@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "devices": {
+      "$deviceId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.child('connectedTo').exists() || data.child('connectedTo').val() == auth.uid)"
+      }
+    }
+  }
+}

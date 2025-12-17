@@ -1,0 +1,392 @@
+{
+  "generated_on": "2025-12-16",
+  "day0_definition": "Day 0 = date of transplanting (or direct seeding emergence) as commonly used in Philippine crop calendars",
+  "_notes_general": "Maturity, fertilizer rates and stage timing vary with season, soil fertility, and management. NPK shown are typical ranges/recommendations; follow local extension or seed tag for exact rates.",
+  "_sources": {
+    "PhilRice_variety_pages_and_recommendations": ":contentReference[oaicite:0]{index=0}",
+    "PinoyRice_variety_characteristics": ":contentReference[oaicite:1]{index=1}",
+    "PalayCheck_and_training_manuals_for_stages": ":contentReference[oaicite:2]{index=2}",
+    "IRRI_growth_stage_guidance": ":contentReference[oaicite:3]{index=3}",
+    "DA_RCEF_and_general_fertilizer_guidance": ":contentReference[oaicite:4]{index=4}"
+  },
+  "varieties": [
+    {
+      "name": "IR64",
+      "aliases": ["IR64 (IRRI mega-variety)"],
+      "breeder": "IRRI",
+      "maturity_days": {
+        "typical_range": "120 - 135",
+        "notes": "varies by seed lot and environment; often reported ~130 days in many Philippine trials."
+      },
+      "recommended_npk_per_ha": {
+        "N": "90 - 120 kg/ha (typical recommendation range)",
+        "P2O5": "30 - 60 kg/ha",
+        "K2O": "30 - 60 kg/ha",
+        "application_timing": [
+          "Basal: basal compound (e.g., 14-14-14) at transplanting depending on soil test",
+          "Split N: first split at tillering (20-25 days), second split at panicle initiation/heading",
+          "Note: Philippine extension commonly uses combinations of compound + urea splits; adjust to soil fertility and PalayCheck guidance."
+        ],
+        "source": ":contentReference[oaicite:5]{index=5}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative (tillering begins)": "7 - 30",
+        "maximum tillering / stem elongation": "30 - 60 (varies by variety length)",
+        "panicle initiation (start reproductive)": "approx day 60 - 90 (for medium-duration IR64 often ~60-70)",
+        "heading": "about 2 - 10 days before flowering (varies by conditions)",
+        "flowering": "short window around heading (1 - 5 days after heading)",
+        "grain_filling": "about 14 - 30 days after flowering",
+        "harvest_mature": "around maturity_days above"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "medium to tall (varies; often 90 - 110 cm)",
+        "yield_potential_t_ha": "4 - 7 (depending on management)",
+        "tillering": "good",
+        "lodging/wind_resistance": "moderate; susceptible to lodging under strong winds if over-fertilized with N",
+        "notes": "IR64 historically reported as high-yielding and good quality for many markets."
+      },
+      "disease_and_pest_reaction": {
+        "blast": "intermediate to variable",
+        "bacterial_leaf_blight": "variable / intermediate",
+        "brown_planthopper (BPH)": "moderate susceptibility to tolerance depending on seed lot",
+        "tungro": "susceptible in some reports",
+        "source": ":contentReference[oaicite:6]{index=6}"
+      },
+      "notes": "IR64 is a widely used 'mega-variety' with well-documented performance but exact reactions vary by environment and seed generation."
+    },
+    {
+      "name": "NSIC Rc216",
+      "aliases": ["Rc216"],
+      "breeder": "NSIC / PhilRice tested release (popular among farmers)",
+      "maturity_days": {
+        "typical_range": "104 - 112 (reports: 104 days direct-seeded, ~112 days transplanted)",
+        "source_note": "PhilRice reported values for Rc216."
+      },
+      "recommended_npk_per_ha": {
+        "N": "80 - 120 kg/ha (split application recommended)",
+        "P2O5": "30 - 60 kg/ha",
+        "K2O": "30 - 60 kg/ha",
+        "application_timing": [
+          "Basal compound at transplanting",
+          "Split N: at active tillering and near panicle initiation"
+        ],
+        "source": ":contentReference[oaicite:7]{index=7}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative (tillering)": "7 - 45 (short-duration variety => shorter vegetative)",
+        "panicle initiation": "about day 45 - 60",
+        "heading": "shortly before flowering; usually around day 80 - 95 depending on season",
+        "flowering": "a few days around heading",
+        "ripening/harvest": "around day 104 - 112"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "medium",
+        "yield_potential_t_ha": "4 - 8 (observed in trials; often promoted with high yield potential)",
+        "tillering": "good",
+        "lodging/wind_resistance": "moderate; early maturing habit reduces lodging exposure",
+        "notes": "favored for ratooning and early maturity fits cropping calendars"
+      },
+      "disease_and_pest_reaction": {
+        "BPH (brown planthopper)": "moderate resistance",
+        "GLH (green leafhopper)": "moderate resistance",
+        "YSB (yellow stem borer)": "moderate resistance",
+        "tungro": "susceptible (reported)",
+        "source": ":contentReference[oaicite:8]{index=8}"
+      },
+      "notes": "NSIC Rc216 is often recommended for its early maturity and good yield; maturity values depend on whether transplanted or direct-seeded."
+    },
+    {
+      "name": "NSIC Rc222",
+      "aliases": ["Rc222"],
+      "breeder": "NSIC / IRRI lineage",
+      "maturity_days": {
+        "typical_range": "106 - 114 (direct-seeded 106, transplanted 114 reported)",
+        "source_note": "PhilRice published maturity differences by planting method."
+      },
+      "recommended_npk_per_ha": {
+        "N": "80 - 120 kg/ha (site-specific; split applications are standard)",
+        "P2O5": "30 - 60 kg/ha",
+        "K2O": "30 - 60 kg/ha",
+        "application_timing": [
+          "Compound basal at planting + urea splits at tillering and panicle initiation"
+        ],
+        "source": ":contentReference[oaicite:9]{index=9}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative (tillering)": "7 - ~50",
+        "panicle initiation": "approx day ~50 - 75",
+        "heading/flowering": "short window near maturity",
+        "harvest": "approx day 106 - 114"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "medium",
+        "yield_potential_t_ha": "4 - 7+ depending on management",
+        "tillering": "very good",
+        "lodging/wind_resistance": "moderate; earlier maturity reduces typhoon exposure",
+        "notes": "recommended nationally for DS & WS (dry & wet season) in many extension materials"
+      },
+      "disease_and_pest_reaction": {
+        "blast": "intermediate",
+        "bacterial_leaf_blight": "intermediate",
+        "BPH/GLH": "moderately resistant",
+        "tungro": "intermediate or variable",
+        "source": ":contentReference[oaicite:10]{index=10}"
+      },
+      "notes": "One of the widely promoted NSIC varieties for general-purpose cultivation."
+    },
+    {
+      "name": "NSIC Rc160",
+      "aliases": ["Rc160"],
+      "breeder": "NSIC",
+      "maturity_days": {
+        "typical_range": "100 - 120 (varies by environment)",
+        "notes": "Often categorized among shorter-to-medium duration varieties."
+      },
+      "recommended_npk_per_ha": {
+        "N": "70 - 110 kg/ha (split)",
+        "P2O5": "30 - 50 kg/ha",
+        "K2O": "20 - 50 kg/ha",
+        "application_timing": [
+          "Compound basal + N splits at tillering and panicle initiation"
+        ],
+        "source": ":contentReference[oaicite:11]{index=11}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative": "7 - ~50",
+        "panicle_initiation": "approx day 45 - 70",
+        "heading": "shortly after PI",
+        "harvest": "approx day 100 - 120"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "medium",
+        "yield_potential_t_ha": "3.5 - 6.5",
+        "tillering": "good",
+        "lodging_resistance": "moderate",
+        "notes": "Selected for fit into common cropping calendars."
+      },
+      "disease_and_pest_reaction": {
+        "general": "variable; check local seed tag for disease reaction",
+        "source": ":contentReference[oaicite:12]{index=12}"
+      },
+      "notes": "Used widely enough to be included in PalayCheck recommendations for certain areas."
+    },
+    {
+      "name": "PSB Rc10 (Pagsanjan)",
+      "aliases": ["PSB Rc10", "Pagsanjan"],
+      "breeder": "PSB / Bred and tested in the Philippines",
+      "maturity_days": {
+        "typical_range": "105 - 110",
+        "notes": "Often described as early-maturing (~105 days)."
+      },
+      "recommended_npk_per_ha": {
+        "N": "70 - 100 kg/ha (split applications advised)",
+        "P2O5": "20 - 50 kg/ha",
+        "K2O": "20 - 50 kg/ha",
+        "application_timing": [
+          "Basal compound at transplant + N split at tillering and PI"
+        ],
+        "source": ":contentReference[oaicite:13]{index=13}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative/tillering": "7 - ~40",
+        "panicle_initiation": "around day 40 - 60",
+        "flowering": "shortly after heading",
+        "harvest": "approx day 105 - 110"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "short to medium",
+        "yield_potential_t_ha": "3.5 - 6",
+        "tillering": "good",
+        "lodging/wind_resistance": "better (early-maturing varieties often avoid typhoon season, reducing lodging risk)",
+        "notes": "Favored when cropping calendar requires earlier harvest before typhoon months."
+      },
+      "disease_and_pest_reaction": {
+        "general": "moderate resistance to common pests; check varietal bulletin",
+        "source": ":contentReference[oaicite:14]{index=14}"
+      },
+      "notes": "PSB Rc10 is commonly recommended for short-season windows."
+    },
+    {
+      "name": "PSB Rc12 (Caliraya)",
+      "aliases": ["PSB Rc12", "Caliraya"],
+      "breeder": "PSB",
+      "maturity_days": {
+        "typical_range": "105 - 115",
+        "notes": "Classified among early-maturing recommended varieties."
+      },
+      "recommended_npk_per_ha": {
+        "N": "70 - 110 kg/ha (split)",
+        "P2O5": "20 - 50 kg/ha",
+        "K2O": "20 - 50 kg/ha",
+        "application_timing": [
+          "Basal compound + N splits at tillering and PI"
+        ],
+        "source": ":contentReference[oaicite:15]{index=15}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative": "7 - ~45",
+        "panicle initiation": "approx day 45 - 65",
+        "flowering": "brief period around heading",
+        "harvest": "approx day 105 - 115"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "short to medium",
+        "yield_potential_t_ha": "4 - 7 under good management",
+        "lodging_resistance": "moderate; early maturity reduces exposure to late storms"
+      },
+      "disease_and_pest_reaction": {
+        "general": "rated suitable for rainfed areas in extension materials",
+        "source": ":contentReference[oaicite:16]{index=16}"
+      },
+      "notes": "Good option where early maturity and fitting cropping windows matter."
+    },
+    {
+      "name": "PSB Rc14 (Rio Grande)",
+      "aliases": ["PSB Rc14", "Rio Grande"],
+      "breeder": "PSB",
+      "maturity_days": {
+        "typical_range": "105 - 115",
+        "notes": "Another early-to-medium maturing PSB line promoted for rainfed lowlands."
+      },
+      "recommended_npk_per_ha": {
+        "N": "70 - 110 kg/ha",
+        "P2O5": "20 - 50 kg/ha",
+        "K2O": "20 - 50 kg/ha",
+        "application_timing": [
+          "Basal compound at planting + N splits at tillering and near PI/heading"
+        ],
+        "source": ":contentReference[oaicite:17]{index=17}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative": "7 - ~45",
+        "panicle_initiation": "approx day 45 - 65",
+        "flowering": "around day 65 - 90 depending on season",
+        "harvest": "approx day 105 - 115"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "short to medium",
+        "yield_potential_t_ha": "3.5 - 6.5",
+        "lodging_resistance": "moderate"
+      },
+      "disease_and_pest_reaction": {
+        "general": "recommended for rainfed areas; check seed bulletin for specific disease ratings",
+        "source": ":contentReference[oaicite:18]{index=18}"
+      },
+      "notes": "Good for rainfed and fits early-maturing class."
+    },
+    {
+      "name": "NSIC Rc192 (Sahod Ulan 1)",
+      "aliases": ["Rc192", "Sahod Ulan 1"],
+      "breeder": "NSIC / PhilRice",
+      "maturity_days": {
+        "typical_range": "105 - 110",
+        "notes": "Listed among varieties suitable for rainfed areas in PhilRice materials."
+      },
+      "recommended_npk_per_ha": {
+        "N": "70 - 110 kg/ha (split)",
+        "P2O5": "20 - 50 kg/ha",
+        "K2O": "20 - 50 kg/ha",
+        "application_timing": [
+          "Basal compound + N splits at tillering and panicle initiation"
+        ],
+        "source": ":contentReference[oaicite:19]{index=19}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative": "7 - ~45",
+        "panicle_initiation": "approx day ~45 - 65",
+        "flowering": "shortly after heading",
+        "harvest": "approx day 105 - 110"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "short to medium",
+        "yield_potential_t_ha": "3.5 - 6",
+        "lodging_resistance": "moderate; selected for rainfed suitability"
+      },
+      "disease_and_pest_reaction": {
+        "general": "moderate; specific ratings available in variety bulletin",
+        "source": ":contentReference[oaicite:20]{index=20}"
+      },
+      "notes": "Promoted for rainfed cropping systems and earlier maturity."
+    },
+    {
+      "name": "NSIC Rc226",
+      "aliases": ["Rc226"],
+      "breeder": "NSIC",
+      "maturity_days": {
+        "typical_range": "110 - 120",
+        "notes": "Medium-duration in many trials; used in yield trials with MOET+LCC management"
+      },
+      "recommended_npk_per_ha": {
+        "N": "80 - 130 kg/ha (higher end under high-input management)",
+        "P2O5": "30 - 60 kg/ha",
+        "K2O": "30 - 60 kg/ha",
+        "application_timing": [
+          "Basal compound + split N at tillering and panicle initiation; potential extra split under high-yield systems"
+        ],
+        "source": ":contentReference[oaicite:21]{index=21}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative": "7 - ~55",
+        "panicle_initiation": "about day 50 - 80",
+        "heading/flowering": "as reproductive phase begins (~35 days reproductive typical)",
+        "harvest": "approx day 110 - 120"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "medium",
+        "yield_potential_t_ha": "high under MOET and improved management (reported high yields in trials)",
+        "lodging_resistance": "depends on N management; moderate"
+      },
+      "disease_and_pest_reaction": {
+        "general": "check variety performance bulletins for local ratings",
+        "source": ":contentReference[oaicite:22]{index=22}"
+      },
+      "notes": "Often evaluated in research for profitability under specific management packages."
+    },
+    {
+      "name": "NSIC Rc480",
+      "aliases": ["Rc480"],
+      "breeder": "NSIC / recent recommended variety in some trials",
+      "maturity_days": {
+        "typical_range": "100 - 120 (depends on exact release and environment)",
+        "notes": "Included here because of recent trial prominence in some Philippine research."
+      },
+      "recommended_npk_per_ha": {
+        "N": "80 - 120 kg/ha",
+        "P2O5": "30 - 60 kg/ha",
+        "K2O": "30 - 60 kg/ha",
+        "application_timing": [
+          "Basal compound + split N at tillering and PI"
+        ],
+        "source": ":contentReference[oaicite:23]{index=23}"
+      },
+      "growth_stages_start_days": {
+        "germination/seedling": "0 - 7",
+        "vegetative": "7 - ~55",
+        "panicle_initiation": "about day 50 - 80",
+        "flowering": "short window near heading",
+        "harvest": "approx day 100 - 120"
+      },
+      "agronomic_stats": {
+        "plant_height_cm": "medium",
+        "yield_potential_t_ha": "moderate to high in trials",
+        "lodging_resistance": "moderate"
+      },
+      "disease_and_pest_reaction": {
+        "general": "reported among promising genotypes in agronomic studies; check local seed bulletin for specific disease ratings",
+        "source": ":contentReference[oaicite:24]{index=24}"
+      },
+      "notes": "Newer variety often reported among best genotypes when short duration is desired."
+    }
+  ],
+  "_disclaimer": "This JSON compiles commonly reported characteristics from Philippine extension and international rice knowledge sources. Exact NPK and stage-day timing should be adapted to your soil test, season (dry/wet), planting method (transplant vs direct-seed), and local extension advice. For site-specific fertilizer prescriptions use PalayCheck or a site-specific nutrient management (SSNM) approach and consult the seed variety bulletin for exact disease ratings.",
+  "_help": "If you want: (A) this exported as a downloadable JSON file, (B) the same data but for aromatic/ heirloom varieties (e.g., Malagkit, Dinorado), or (C) a CSV with numeric columns only — tell me which and I will produce it."
+}

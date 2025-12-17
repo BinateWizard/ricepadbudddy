@@ -1,0 +1,60 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection - users can read/write their own document
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Subcollection: Fields under users
+      match /fields/{fieldId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Subcollection: Paddies under fields
+        match /paddies/{paddyId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+          
+          // Subcollection: Logs under paddies
+          match /logs/{logId} {
+            allow read, write: if request.auth != null && request.auth.uid == userId;
+          }
+        }
+        
+        // Subcollection: Tasks under fields
+        match /tasks/{taskId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+      
+      // Subcollection: Notifications under users
+      match /notifications/{notificationId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Top-level Fields collection - users can read/write their own fields
+    match /fields/{fieldId} {
+      allow read, write: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid);
+    }
+    
+    // Devices collection - users can read/write devices associated with their fields
+    match /devices/{deviceId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Top-level Notifications collection - users can read their own notifications
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if request.auth != null;
+    }
+    
+    // Activities collection - read-only for authenticated users
+    match /activities/{activityId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}
