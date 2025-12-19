@@ -2,26 +2,47 @@ import { database } from '@/lib/firebase';
 import { ref, get } from 'firebase/database';
 
 /**
- * RTDB Structure Expected:
+ * RTDB Structure:
  * devices/
  *   DEVICE_0001/
- *     heartbeat: timestamp (number)
- *     sensors/
- *       nitrogen: number (mg/kg)
- *       phosphorus: number (mg/kg)
- *       potassium: number (mg/kg)
- *       temperature: number (°C)
- *       humidity: number (%)
- *       waterLevel: number (cm)
- *     location/
- *       latitude: number
- *       longitude: number
- *       timestamp: number
+ *     connectedAt: ISO timestamp string
+ *     connectedTo: userId
+ *     fieldId: fieldId
+ *     gps: { alt, hdop, lat, lng, sats, ts }
+ *     npk: { k, n, p, timestamp }
+ *     paddyName: string
+ *     status: "connected" | "disconnected"
  */
+
+export interface DeviceNPK {
+  n?: number;  // Nitrogen
+  p?: number;  // Phosphorus
+  k?: number;  // Potassium
+  timestamp?: number;
+}
+
+export interface DeviceGPS {
+  lat?: number;
+  lng?: number;
+  alt?: number;
+  hdop?: number;
+  sats?: number;
+  ts?: number;
+}
+
+export interface DeviceData {
+  connectedAt?: string;
+  connectedTo?: string;
+  fieldId?: string;
+  paddyName?: string;
+  status?: string;
+  npk?: DeviceNPK;
+  gps?: DeviceGPS;
+}
 
 export interface DeviceHeartbeat {
   isAlive: boolean;
-  lastSeen: number | null;
+  lastSeen: string | null;
   minutesAgo: number | null;
 }
 
@@ -29,9 +50,6 @@ export interface SensorReadings {
   nitrogen?: number;
   phosphorus?: number;
   potassium?: number;
-  temperature?: number;
-  humidity?: number;
-  waterLevel?: number;
   timestamp?: number;
 }
 
@@ -46,25 +64,43 @@ export interface DeviceStatusResult {
 }
 
 /**
- * Check if device heartbeat is active (within last 5 minutes)
+ * Get complete device data from RTDB
+ */
+export async function getDeviceData(deviceId: string): Promise<DeviceData | null> {
+  try {
+    const deviceRef = ref(database, `devices/${deviceId}`);
+    const snapshot = await get(deviceRef);
+    
+    if (!snapshot.exists()) {
+      return null;
+    }
+    
+    return snapshot.val() as DeviceData;
+  } catch (error) {
+    console.error(`Error fetching device data for ${deviceId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Check if device is connected (based on status and connectedAt)
  */
 export async function checkDeviceHeartbeat(deviceId: string): Promise<DeviceHeartbeat> {
   try {
-    const heartbeatRef = ref(database, `devices/${deviceId}/heartbeat`);
-    const snapshot = await get(heartbeatRef);
+    const deviceData = await getDeviceData(deviceId);
     
-    if (!snapshot.exists()) {
+    if (!deviceData || !deviceData.connectedAt) {
       return { isAlive: false, lastSeen: null, minutesAgo: null };
     }
     
-    const lastHeartbeat = snapshot.val() as number;
+    const connectedAt = new Date(deviceData.connectedAt).getTime();
     const now = Date.now();
-    const minutesAgo = Math.floor((now - lastHeartbeat) / 60000);
+    const minutesAgo = Math.floor((now - connectedAt) / 60000);
     
-    // Consider device alive if heartbeat within last 5 minutes
-    const isAlive = minutesAgo < 5;
+    // Consider device alive if status is "connected" and connected within last 5 minutes
+    const isAlive = deviceData.status === 'connected' && minutesAgo < 5;
     
-    return { isAlive, lastSeen: lastHeartbeat, minutesAgo };
+    return { isAlive, lastSeen: deviceData.connectedAt, minutesAgo };
   } catch (error) {
     console.error(`Error checking heartbeat for ${deviceId}:`, error);
     return { isAlive: false, lastSeen: null, minutesAgo: null };
@@ -72,18 +108,23 @@ export async function checkDeviceHeartbeat(deviceId: string): Promise<DeviceHear
 }
 
 /**
- * Get current sensor readings from RTDB
+ * Get current NPK sensor readings from RTDB
  */
 export async function getDeviceSensorReadings(deviceId: string): Promise<SensorReadings> {
   try {
-    const sensorsRef = ref(database, `devices/${deviceId}/sensors`);
-    const snapshot = await get(sensorsRef);
+    const deviceData = await getDeviceData(deviceId);
     
-    if (!snapshot.exists()) {
+    if (!deviceData || !deviceData.npk) {
       return {};
     }
     
-    return snapshot.val() as SensorReadings;
+    // Convert n, p, k to nitrogen, phosphorus, potassium
+    return {
+      nitrogen: deviceData.npk.n,
+      phosphorus: deviceData.npk.p,
+      potassium: deviceData.npk.k,
+      timestamp: deviceData.npk.timestamp,
+    };
   } catch (error) {
     console.error(`Error fetching sensor readings for ${deviceId}:`, error);
     return {};
@@ -91,16 +132,42 @@ export async function getDeviceSensorReadings(deviceId: string): Promise<SensorR
 }
 
 /**
+ * Get NPK values for a device
+ */
+export async function getDeviceNPK(deviceId: string): Promise<DeviceNPK | null> {
+  try {
+    const deviceData = await getDeviceData(deviceId);
+    return deviceData?.npk || null;
+  } catch (error) {
+    console.error(`Error fetching NPK for ${deviceId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get GPS location for a device
+ */
+export async function getDeviceGPS(deviceId: string): Promise<DeviceGPS | null> {
+  try {
+    const deviceData = await getDeviceData(deviceId);
+    return deviceData?.gps || null;
+  } catch (error) {
+    console.error(`Error fetching GPS for ${deviceId}:`, error);
+    return null;
+  }
+}
+
+/**
  * Get complete device status with heartbeat and sensor checks
  */
 export async function getDeviceStatus(deviceId: string): Promise<DeviceStatusResult> {
+  const deviceData = await getDeviceData(deviceId);
   const heartbeat = await checkDeviceHeartbeat(deviceId);
   const readings = await getDeviceSensorReadings(deviceId);
   
-  const hasReadings = Object.keys(readings).length > 0 && 
-                      (readings.nitrogen !== undefined || 
-                       readings.phosphorus !== undefined || 
-                       readings.potassium !== undefined);
+  const hasReadings = readings.nitrogen !== undefined || 
+                      readings.phosphorus !== undefined || 
+                      readings.potassium !== undefined;
   
   // Format last update time
   let lastUpdate = 'No connection';
@@ -116,8 +183,10 @@ export async function getDeviceStatus(deviceId: string): Promise<DeviceStatusRes
     }
   }
   
-  // Determine status
-  if (!heartbeat.isAlive && !hasReadings) {
+  // Determine status based on deviceData.status
+  const deviceStatus = deviceData?.status || 'disconnected';
+  
+  if (deviceStatus !== 'connected' || !heartbeat.isAlive) {
     return {
       status: 'offline',
       message: 'Device is offline. Check power and network connection.',

@@ -140,9 +140,7 @@ export default function FieldDetail() {
           console.log('Paddies found:', paddiesData.length);
           setPaddies(paddiesData);
 
-          // Fetch device readings for troubleshooting
-          // Note: This would need to be implemented with your actual data structure
-          // For now, storing empty array - implement based on your Firebase RTDB structure
+          // Device readings will be fetched separately from RTDB
           setDeviceReadings([]);
         } else {
           console.error('Field document does not exist');
@@ -161,6 +159,54 @@ export default function FieldDetail() {
 
     fetchFieldData();
   }, [user, fieldId]);
+
+  // Fetch device readings from RTDB and auto-log
+  const fetchDeviceReadings = async () => {
+    if (!user || paddies.length === 0) return;
+
+    try {
+      const { getDeviceData } = await import('@/lib/utils/deviceStatus');
+      const { autoLogReadings, logSensorReadings } = await import('@/lib/utils/sensorLogging');
+
+      const readings: any[] = [];
+      
+      for (const paddy of paddies) {
+        if (!paddy.deviceId) continue;
+        
+        try {
+          const deviceData = await getDeviceData(paddy.deviceId);
+          
+          if (deviceData) {
+            readings.push({
+              deviceId: paddy.deviceId,
+              paddyId: paddy.id,
+              ...deviceData,
+            });
+
+            // Auto-log NPK readings if available (rate-limited to once per hour)
+            if (deviceData.npk && (deviceData.npk.n !== undefined || deviceData.npk.p !== undefined || deviceData.npk.k !== undefined)) {
+              await autoLogReadings(user.uid, fieldId, paddy.id, deviceData.npk);
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching device ${paddy.deviceId}:`, error);
+        }
+      }
+      
+      setDeviceReadings(readings);
+    } catch (error) {
+      console.error('Error fetching device readings:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchDeviceReadings();
+    
+    // Refresh device readings every 5 minutes
+    const interval = setInterval(fetchDeviceReadings, 5 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, [user, fieldId, paddies]);
   
   // Handle add device submission
   const handleAddDevice = async (e: React.FormEvent) => {
@@ -227,28 +273,22 @@ export default function FieldDetail() {
     
     try {
       // Fetch GPS coordinates from Firebase RTDB
-      const { database } = await import('@/lib/firebase');
-      const { ref, get } = await import('firebase/database');
+      const { getDeviceGPS } = await import('@/lib/utils/deviceStatus');
       
-      const locationRef = ref(database, `devices/${paddy.deviceId}/location`);
-      const snapshot = await get(locationRef);
+      const gps = await getDeviceGPS(paddy.deviceId);
       
-      if (snapshot.exists()) {
-        const location = snapshot.val();
-        if (location.latitude && location.longitude) {
-          setLocationData({ 
-            lat: location.latitude, 
-            lng: location.longitude,
-            timestamp: location.timestamp
-          });
-        }
+      if (gps && gps.lat && gps.lng) {
+        setLocationData({ 
+          lat: gps.lat, 
+          lng: gps.lng,
+          timestamp: gps.ts
+        });
       } else {
         // Check if other devices have location
         for (const otherPaddy of paddies) {
           if (otherPaddy.deviceId !== paddy.deviceId) {
-            const otherLocationRef = ref(database, `devices/${otherPaddy.deviceId}/location`);
-            const otherSnapshot = await get(otherLocationRef);
-            if (otherSnapshot.exists() && otherSnapshot.val().latitude) {
+            const otherGPS = await getDeviceGPS(otherPaddy.deviceId);
+            if (otherGPS && otherGPS.lat && otherGPS.lng) {
               setOtherDevicesHaveLocation(true);
               break;
             }
@@ -1049,13 +1089,9 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
 
 // Helper function to check device status
 function getDeviceStatus(paddy: any, deviceReadings: any[]) {
-  // Check if device has recent heartbeat (within last 5 minutes)
-  // TODO: Implement actual heartbeat checking from Firebase RTDB
-  // For now, check if deviceId exists and has readings
-  const hasHeartbeat = false; // Set to false by default - implement real heartbeat check
-  const hasReadings = deviceReadings.some(r => r.deviceId === paddy.deviceId);
+  const deviceReading = deviceReadings.find(r => r.deviceId === paddy.deviceId);
   
-  if (!hasHeartbeat && !hasReadings) {
+  if (!deviceReading) {
     return {
       status: 'offline',
       message: 'Device is offline. Check power supply and network connection.',
@@ -1064,7 +1100,23 @@ function getDeviceStatus(paddy: any, deviceReadings: any[]) {
     };
   }
   
-  if (hasHeartbeat && !hasReadings) {
+  const deviceStatus = deviceReading.status || 'disconnected';
+  const hasNPK = deviceReading.npk && (
+    deviceReading.npk.n !== undefined || 
+    deviceReading.npk.p !== undefined || 
+    deviceReading.npk.k !== undefined
+  );
+  
+  if (deviceStatus !== 'connected') {
+    return {
+      status: 'offline',
+      message: 'Device is offline. Check power supply and network connection.',
+      color: 'red',
+      badge: 'Offline'
+    };
+  }
+  
+  if (deviceStatus === 'connected' && !hasNPK) {
     return {
       status: 'sensor-issue',
       message: 'Device is online but sensors are not reporting data. Check sensor connections.',
@@ -1105,6 +1157,9 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
         <div className="space-y-4">
           {paddies.map((paddy) => {
             const deviceStatus = getDeviceStatus(paddy, deviceReadings || []);
+            const deviceReading = deviceReadings?.find(r => r.deviceId === paddy.deviceId);
+            const npk = deviceReading?.npk;
+            
             return (
               <div 
                 key={paddy.id} 
@@ -1116,6 +1171,33 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
                     <p className="text-sm text-gray-600">Device: {paddy.deviceId}</p>
                     {paddy.description && (
                       <p className="text-sm text-gray-500 mt-2">{paddy.description}</p>
+                    )}
+                    
+                    {/* NPK Values */}
+                    {npk && (npk.n !== undefined || npk.p !== undefined || npk.k !== undefined) && (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {npk.n !== undefined && (
+                          <div className="bg-blue-50 rounded-lg p-2">
+                            <p className="text-xs text-blue-600 font-medium">N</p>
+                            <p className="text-sm font-bold text-blue-900">{Math.round(npk.n)}</p>
+                            <p className="text-xs text-blue-500">mg/kg</p>
+                          </div>
+                        )}
+                        {npk.p !== undefined && (
+                          <div className="bg-purple-50 rounded-lg p-2">
+                            <p className="text-xs text-purple-600 font-medium">P</p>
+                            <p className="text-sm font-bold text-purple-900">{Math.round(npk.p)}</p>
+                            <p className="text-xs text-purple-500">mg/kg</p>
+                          </div>
+                        )}
+                        {npk.k !== undefined && (
+                          <div className="bg-orange-50 rounded-lg p-2">
+                            <p className="text-xs text-orange-600 font-medium">K</p>
+                            <p className="text-sm font-bold text-orange-900">{Math.round(npk.k)}</p>
+                            <p className="text-xs text-orange-500">mg/kg</p>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -1160,6 +1242,109 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('7d');
   const [historicalLogs, setHistoricalLogs] = useState<any[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isLogging, setIsLogging] = useState(false);
+  const [fieldStats, setFieldStats] = useState<{
+    nitrogen: { current: number | null; average: number | null; min: number | null; max: number | null };
+    phosphorus: { current: number | null; average: number | null; min: number | null; max: number | null };
+    potassium: { current: number | null; average: number | null; min: number | null; max: number | null };
+  } | null>(null);
+
+  // Manual log function - logs current readings immediately
+  const handleManualLog = async () => {
+    if (!user) return;
+    
+    setIsLogging(true);
+    try {
+      const { logSensorReadings } = await import('@/lib/utils/sensorLogging');
+      let loggedCount = 0;
+      
+      for (const reading of deviceReadings) {
+        if (reading.npk && (reading.npk.n !== undefined || reading.npk.p !== undefined || reading.npk.k !== undefined)) {
+          const paddy = paddies.find(p => p.deviceId === reading.deviceId);
+          if (paddy) {
+            await logSensorReadings(user.uid, fieldId, paddy.id, reading.npk);
+            loggedCount++;
+          }
+        }
+      }
+      
+      if (loggedCount > 0) {
+        alert(`Successfully logged ${loggedCount} reading(s) to history!`);
+        // Refresh historical logs
+        const fetchLogs = async () => {
+          // Trigger a refresh by updating timeRange slightly
+          setTimeRange(prev => prev);
+        };
+        fetchLogs();
+      } else {
+        alert('No NPK data available to log. Make sure devices are connected and sending data.');
+      }
+    } catch (error) {
+      console.error('Error manually logging:', error);
+      alert('Failed to log readings. Please try again.');
+    } finally {
+      setIsLogging(false);
+    }
+  };
+  
+  // Calculate field-level statistics from current device readings AND historical logs
+  useEffect(() => {
+    // Get current values from RTDB
+    const npkValues = deviceReadings
+      .filter(r => r.npk)
+      .map(r => r.npk);
+
+    // Get historical values from logs
+    const historicalNitrogen = historicalLogs
+      .filter(log => log.nitrogen !== undefined && log.nitrogen !== null)
+      .map(log => log.nitrogen as number);
+    
+    const historicalPhosphorus = historicalLogs
+      .filter(log => log.phosphorus !== undefined && log.phosphorus !== null)
+      .map(log => log.phosphorus as number);
+    
+    const historicalPotassium = historicalLogs
+      .filter(log => log.potassium !== undefined && log.potassium !== null)
+      .map(log => log.potassium as number);
+
+    // Current values from RTDB
+    const currentNitrogen = npkValues.length > 0 ? npkValues.map(n => n.n).filter(n => n !== undefined)[0] : undefined;
+    const currentPhosphorus = npkValues.length > 0 ? npkValues.map(n => n.p).filter(n => n !== undefined)[0] : undefined;
+    const currentPotassium = npkValues.length > 0 ? npkValues.map(n => n.k).filter(n => n !== undefined)[0] : undefined;
+
+    // Combine current and historical for comprehensive stats
+    const allNitrogen = [...(currentNitrogen !== undefined ? [currentNitrogen] : []), ...historicalNitrogen];
+    const allPhosphorus = [...(currentPhosphorus !== undefined ? [currentPhosphorus] : []), ...historicalPhosphorus];
+    const allPotassium = [...(currentPotassium !== undefined ? [currentPotassium] : []), ...historicalPotassium];
+
+    const calculateStats = (current: number | undefined, allValues: number[]) => {
+      if (allValues.length === 0 && current === undefined) {
+        return { current: null, average: null, min: null, max: null };
+      }
+      
+      if (allValues.length === 0) {
+        return {
+          current: current || null,
+          average: current || null,
+          min: current || null,
+          max: current || null,
+        };
+      }
+
+      return {
+        current: current !== undefined ? current : allValues[0] || null,
+        average: allValues.reduce((a, b) => a + b, 0) / allValues.length,
+        min: Math.min(...allValues),
+        max: Math.max(...allValues),
+      };
+    };
+
+    setFieldStats({
+      nitrogen: calculateStats(currentNitrogen, allNitrogen),
+      phosphorus: calculateStats(currentPhosphorus, allPhosphorus),
+      potassium: calculateStats(currentPotassium, allPotassium),
+    });
+  }, [deviceReadings, historicalLogs]);
   
   // Fetch historical logs based on time range
   useEffect(() => {
@@ -1170,19 +1355,24 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
       try {
         const now = new Date();
         let startDate = new Date();
+        let days = 7;
         
         switch(timeRange) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
+            days = 7;
             break;
           case '30d':
             startDate.setDate(now.getDate() - 30);
+            days = 30;
             break;
           case '90d':
             startDate.setDate(now.getDate() - 90);
+            days = 90;
             break;
           case 'all':
             startDate = new Date(0); // Beginning of time
+            days = 9999;
             break;
         }
         
@@ -1233,11 +1423,26 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
     fetchLogs();
   }, [user, fieldId, paddies, timeRange]);
   
-  // Calculate average statistics across all paddies
-  // TODO: Implement actual data averaging from device readings
-  
   return (
     <div className="space-y-4">
+      {/* Data Persistence Info */}
+      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <svg className="w-5 h-5 text-green-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-green-900 mb-1">Data is Being Stored</h3>
+            <p className="text-xs text-green-700">
+              All NPK readings are automatically logged to Firestore every hour. Historical data is preserved for long-term analysis and trend tracking. 
+              Use the time range filters below to view data from different periods.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Average Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Nitrogen Card */}
@@ -1246,8 +1451,20 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <h3 className="text-xs font-semibold text-gray-700">Nitrogen (N)</h3>
             <span className="text-xl">🧪</span>
           </div>
-          <p className="text-xl font-bold text-gray-900">--</p>
+          <p className="text-xl font-bold text-gray-900">
+            {fieldStats?.nitrogen.current !== null && fieldStats?.nitrogen.current !== undefined
+              ? Math.round(fieldStats.nitrogen.current)
+              : '--'}
+          </p>
           <p className="text-xs text-gray-500 mt-1">mg/kg</p>
+          {fieldStats?.nitrogen.average !== null && fieldStats?.nitrogen.average !== undefined && (
+            <div className="mt-2 space-y-0.5">
+              <p className="text-xs text-gray-400">Avg: {Math.round(fieldStats.nitrogen.average)}</p>
+              {fieldStats.nitrogen.min !== null && fieldStats.nitrogen.max !== null && (
+                <p className="text-xs text-gray-400">Range: {Math.round(fieldStats.nitrogen.min)}-{Math.round(fieldStats.nitrogen.max)}</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Phosphorus Card */}
@@ -1256,8 +1473,20 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <h3 className="text-xs font-semibold text-gray-700">Phosphorus (P)</h3>
             <span className="text-xl">⚗️</span>
           </div>
-          <p className="text-xl font-bold text-gray-900">--</p>
+          <p className="text-xl font-bold text-gray-900">
+            {fieldStats?.phosphorus.current !== null && fieldStats?.phosphorus.current !== undefined
+              ? Math.round(fieldStats.phosphorus.current)
+              : '--'}
+          </p>
           <p className="text-xs text-gray-500 mt-1">mg/kg</p>
+          {fieldStats?.phosphorus.average !== null && fieldStats?.phosphorus.average !== undefined && (
+            <div className="mt-2 space-y-0.5">
+              <p className="text-xs text-gray-400">Avg: {Math.round(fieldStats.phosphorus.average)}</p>
+              {fieldStats.phosphorus.min !== null && fieldStats.phosphorus.max !== null && (
+                <p className="text-xs text-gray-400">Range: {Math.round(fieldStats.phosphorus.min)}-{Math.round(fieldStats.phosphorus.max)}</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Potassium Card */}
@@ -1266,8 +1495,20 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <h3 className="text-xs font-semibold text-gray-700">Potassium (K)</h3>
             <span className="text-xl">🔬</span>
           </div>
-          <p className="text-xl font-bold text-gray-900">--</p>
+          <p className="text-xl font-bold text-gray-900">
+            {fieldStats?.potassium.current !== null && fieldStats?.potassium.current !== undefined
+              ? Math.round(fieldStats.potassium.current)
+              : '--'}
+          </p>
           <p className="text-xs text-gray-500 mt-1">mg/kg</p>
+          {fieldStats?.potassium.average !== null && fieldStats?.potassium.average !== undefined && (
+            <div className="mt-2 space-y-0.5">
+              <p className="text-xs text-gray-400">Avg: {Math.round(fieldStats.potassium.average)}</p>
+              {fieldStats.potassium.min !== null && fieldStats.potassium.max !== null && (
+                <p className="text-xs text-gray-400">Range: {Math.round(fieldStats.potassium.min)}-{Math.round(fieldStats.potassium.max)}</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Temperature Card - Coming Soon */}
@@ -1304,8 +1545,46 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
       {/* Data Visualization Placeholder */}
       <div className="bg-white rounded-xl shadow-md p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">Data Trends</h2>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Data Trends</h2>
+            <p className="text-xs text-gray-500 mt-1">Historical NPK readings are automatically logged and stored in Firestore</p>
+          </div>
           <div className="flex gap-2">
+            <button
+              onClick={() => {
+                // Force refresh by toggling timeRange
+                const currentRange = timeRange;
+                setTimeRange('7d');
+                setTimeout(() => setTimeRange(currentRange), 100);
+              }}
+              className="px-3 py-1.5 text-sm rounded-lg transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1.5"
+              title="Refresh data"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh
+            </button>
+            <button
+              onClick={handleManualLog}
+              disabled={isLogging || deviceReadings.length === 0}
+              className="px-3 py-1.5 text-sm rounded-lg transition-colors bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              {isLogging ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Logging...
+                </>
+              ) : (
+                <>
+                  <span>📝</span>
+                  Log Now
+                </>
+              )}
+            </button>
             <button
               onClick={() => setTimeRange('7d')}
               className={`px-3 py-1 text-sm rounded-lg transition-colors ${
@@ -1348,38 +1627,93 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             </button>
           </div>
         </div>
-        <div className="text-center py-8">
-          {isLoadingLogs ? (
-            <div className="flex flex-col items-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-3"></div>
-              <p className="text-gray-500">Loading historical data...</p>
-            </div>
-          ) : historicalLogs.length > 0 ? (
             <div>
-              <div className="text-5xl mb-3">📊</div>
-              <p className="text-gray-500">Found {historicalLogs.length} readings</p>
-              <p className="text-sm text-gray-400 mt-1">NPK levels over the last {
-                timeRange === '7d' ? '7 days' :
-                timeRange === '30d' ? '30 days' :
-                timeRange === '90d' ? '90 days' :
-                'planting period'
-              }</p>
-              <p className="text-xs text-gray-400 mt-2">Chart visualization coming soon</p>
+              {isLoadingLogs ? (
+                <div className="flex flex-col items-center py-8">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-3"></div>
+                  <p className="text-gray-500">Loading historical data...</p>
+                </div>
+              ) : historicalLogs.length > 0 ? (
+                <div>
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-600">
+                      Found <strong>{historicalLogs.length}</strong> readings over the last {
+                        timeRange === '7d' ? '7 days' :
+                        timeRange === '30d' ? '30 days' :
+                        timeRange === '90d' ? '90 days' :
+                        'planting period'
+                      }
+                    </p>
+                  </div>
+                  
+                  {/* Historical Data Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="text-left py-2 px-3 text-gray-700 font-semibold">Date/Time</th>
+                          <th className="text-left py-2 px-3 text-gray-700 font-semibold">Paddy</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">N (mg/kg)</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">P (mg/kg)</th>
+                          <th className="text-right py-2 px-3 text-gray-700 font-semibold">K (mg/kg)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historicalLogs.slice(0, 20).map((log, index) => (
+                          <tr key={log.id || index} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-2 px-3 text-gray-600">
+                              {log.timestamp instanceof Date 
+                                ? log.timestamp.toLocaleString('en-US', { 
+                                    month: 'short', 
+                                    day: 'numeric', 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                  })
+                                : new Date(log.timestamp).toLocaleString('en-US', { 
+                                    month: 'short', 
+                                    day: 'numeric', 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                  })}
+                            </td>
+                            <td className="py-2 px-3 text-gray-600">{log.paddyName || 'Unknown'}</td>
+                            <td className="py-2 px-3 text-right font-medium text-blue-700">
+                              {log.nitrogen !== undefined && log.nitrogen !== null ? Math.round(log.nitrogen) : '--'}
+                            </td>
+                            <td className="py-2 px-3 text-right font-medium text-purple-700">
+                              {log.phosphorus !== undefined && log.phosphorus !== null ? Math.round(log.phosphorus) : '--'}
+                            </td>
+                            <td className="py-2 px-3 text-right font-medium text-orange-700">
+                              {log.potassium !== undefined && log.potassium !== null ? Math.round(log.potassium) : '--'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {historicalLogs.length > 20 && (
+                      <p className="text-xs text-gray-500 mt-2 text-center">
+                        Showing first 20 of {historicalLogs.length} readings
+                      </p>
+                    )}
+                  </div>
+                  
+                  <p className="text-xs text-gray-400 mt-4 text-center">Chart visualization coming soon</p>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-5xl mb-3">📊</div>
+                  <p className="text-gray-500">No historical data found</p>
+                  <p className="text-sm text-gray-400 mt-1">Sensor readings will be logged automatically when devices send data</p>
+                  <p className="text-xs text-gray-400 mt-2">Data is stored in Firestore for long-term tracking</p>
+                </div>
+              )}
             </div>
-          ) : (
-            <div>
-              <div className="text-5xl mb-3">📊</div>
-              <p className="text-gray-500">No historical data found</p>
-              <p className="text-sm text-gray-400 mt-1">Sensor readings will be logged automatically</p>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Field Summary */}
       <div className="bg-white rounded-xl shadow-md p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-3">Field Summary</h2>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-600">Total Paddies</p>
             <p className="text-xl font-bold text-gray-900">{paddies.length}</p>
@@ -1388,8 +1722,73 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <p className="text-xs text-gray-600">Active Devices</p>
             <p className="text-xl font-bold text-gray-900">{paddies.filter(p => getDeviceStatus(p, deviceReadings).status !== 'offline').length}</p>
           </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-600">Historical Logs</p>
+            <p className="text-xl font-bold text-gray-900">{historicalLogs.length}</p>
+            <p className="text-xs text-gray-500 mt-1">Total readings</p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-600">Data Points</p>
+            <p className="text-xl font-bold text-gray-900">
+              {historicalLogs.filter(l => l.nitrogen !== undefined || l.phosphorus !== undefined || l.potassium !== undefined).length}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">With NPK data</p>
+          </div>
         </div>
       </div>
+
+      {/* Per-Paddy Statistics */}
+      {paddies.length > 0 && deviceReadings.length > 0 && (
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Per-Paddy Current Readings</h2>
+          <div className="space-y-3">
+            {paddies.map((paddy) => {
+              const reading = deviceReadings.find(r => r.deviceId === paddy.deviceId);
+              const npk = reading?.npk;
+              
+              if (!npk || (npk.n === undefined && npk.p === undefined && npk.k === undefined)) {
+                return null;
+              }
+              
+              return (
+                <div key={paddy.id} className="border border-gray-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-gray-900 mb-3">{paddy.paddyName || paddy.deviceId}</h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {npk.n !== undefined && (
+                      <div className="bg-blue-50 rounded-lg p-3">
+                        <p className="text-xs text-blue-600 font-medium mb-1">Nitrogen (N)</p>
+                        <p className="text-lg font-bold text-blue-900">{Math.round(npk.n)}</p>
+                        <p className="text-xs text-blue-500">mg/kg</p>
+                      </div>
+                    )}
+                    {npk.p !== undefined && (
+                      <div className="bg-purple-50 rounded-lg p-3">
+                        <p className="text-xs text-purple-600 font-medium mb-1">Phosphorus (P)</p>
+                        <p className="text-lg font-bold text-purple-900">{Math.round(npk.p)}</p>
+                        <p className="text-xs text-purple-500">mg/kg</p>
+                      </div>
+                    )}
+                    {npk.k !== undefined && (
+                      <div className="bg-orange-50 rounded-lg p-3">
+                        <p className="text-xs text-orange-600 font-medium mb-1">Potassium (K)</p>
+                        <p className="text-lg font-bold text-orange-900">{Math.round(npk.k)}</p>
+                        <p className="text-xs text-orange-500">mg/kg</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {paddies.every(p => {
+              const reading = deviceReadings.find(r => r.deviceId === p.deviceId);
+              const npk = reading?.npk;
+              return !npk || (npk.n === undefined && npk.p === undefined && npk.k === undefined);
+            }) && (
+              <p className="text-gray-500 text-center py-4">No current NPK readings available from devices</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -25,29 +25,74 @@ export default function DeviceDetail() {
   const [gpsData, setGpsData] = useState<any>(null);
   const [loadingGps, setLoadingGps] = useState(false);
   
-  // Get device status based on heartbeat and sensor readings
-  const getDeviceStatus = () => {
-    // TODO: Check actual heartbeat from Firebase RTDB
-    const hasHeartbeat = false; // Placeholder - implement real RTDB check
-    const readings = deviceReadings.filter(r => r.deviceId === deviceId);
+  // Fetch device data from RTDB and auto-log
+  useEffect(() => {
+    const fetchDeviceData = async () => {
+      if (!user || !paddyInfo || !fieldInfo) return;
+      
+      try {
+        const { getDeviceData, getDeviceStatus } = await import('@/lib/utils/deviceStatus');
+        const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
+        const deviceData = await getDeviceData(deviceId);
+        const status = await getDeviceStatus(deviceId);
+        
+        if (deviceData) {
+          setDeviceInfo(deviceData);
+          setDeviceReadings([{ deviceId, ...deviceData }]);
+          
+          // Auto-log NPK readings if available
+          if (deviceData.npk && (deviceData.npk.n !== undefined || deviceData.npk.p !== undefined || deviceData.npk.k !== undefined)) {
+            await autoLogReadings(user.uid, fieldInfo.id, paddyInfo.id, deviceData.npk);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching device data:', error);
+      }
+    };
     
-    if (!hasHeartbeat && readings.length === 0) {
+    fetchDeviceData();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchDeviceData, 30000);
+    return () => clearInterval(interval);
+  }, [deviceId, user, paddyInfo, fieldInfo]);
+  
+  // Get device status
+  const getDeviceStatusDisplay = () => {
+    if (!deviceInfo) {
       return {
         status: 'offline',
-        message: 'Device is offline. Check power and network connection.',
+        message: 'Device not found or offline.',
         color: 'red',
         badge: 'Offline',
         lastUpdate: 'No connection'
       };
     }
     
-    if (hasHeartbeat && readings.length === 0) {
+    const deviceStatus = deviceInfo.status || 'disconnected';
+    const hasNPK = deviceInfo.npk && (
+      deviceInfo.npk.n !== undefined || 
+      deviceInfo.npk.p !== undefined || 
+      deviceInfo.npk.k !== undefined
+    );
+    
+    if (deviceStatus !== 'connected') {
+      return {
+        status: 'offline',
+        message: 'Device is offline. Check power and network connection.',
+        color: 'red',
+        badge: 'Offline',
+        lastUpdate: deviceInfo.connectedAt ? new Date(deviceInfo.connectedAt).toLocaleString() : 'No connection'
+      };
+    }
+    
+    if (deviceStatus === 'connected' && !hasNPK) {
       return {
         status: 'sensor-issue',
         message: 'Device connected but sensor readings unavailable. Check sensor connections.',
         color: 'yellow',
         badge: 'Sensor Issue',
-        lastUpdate: 'Just now'
+        lastUpdate: deviceInfo.connectedAt ? new Date(deviceInfo.connectedAt).toLocaleString() : 'Just now'
       };
     }
     
@@ -56,11 +101,11 @@ export default function DeviceDetail() {
       message: 'All systems operational',
       color: 'green',
       badge: 'Connected',
-      lastUpdate: 'Just now'
+      lastUpdate: deviceInfo.connectedAt ? new Date(deviceInfo.connectedAt).toLocaleString() : 'Just now'
     };
   };
   
-  const deviceStatus = getDeviceStatus();
+  const deviceStatus = getDeviceStatusDisplay();
   
   // Fetch device and paddy information
   useEffect(() => {
@@ -342,7 +387,9 @@ export default function DeviceDetail() {
                   <p className="text-xs font-semibold text-gray-700">Nitrogen (N)</p>
                   <span className="text-lg">🧪</span>
                 </div>
-                <p className="text-xl font-bold text-gray-900">--</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {deviceInfo?.npk?.n !== undefined ? Math.round(deviceInfo.npk.n) : '--'}
+                </p>
                 <p className="text-xs text-gray-500 mt-1">mg/kg</p>
               </div>
               <div className="p-4 bg-green-50 rounded-lg">
@@ -350,7 +397,9 @@ export default function DeviceDetail() {
                   <p className="text-xs font-semibold text-gray-700">Phosphorus (P)</p>
                   <span className="text-lg">⚗️</span>
                 </div>
-                <p className="text-xl font-bold text-gray-900">--</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {deviceInfo?.npk?.p !== undefined ? Math.round(deviceInfo.npk.p) : '--'}
+                </p>
                 <p className="text-xs text-gray-500 mt-1">mg/kg</p>
               </div>
               <div className="p-4 bg-purple-50 rounded-lg">
@@ -358,7 +407,9 @@ export default function DeviceDetail() {
                   <p className="text-xs font-semibold text-gray-700">Potassium (K)</p>
                   <span className="text-lg">🔬</span>
                 </div>
-                <p className="text-xl font-bold text-gray-900">--</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {deviceInfo?.npk?.k !== undefined ? Math.round(deviceInfo.npk.k) : '--'}
+                </p>
                 <p className="text-xs text-gray-500 mt-1">mg/kg</p>
               </div>
               <div className="p-4 bg-orange-50 rounded-lg">
@@ -387,6 +438,17 @@ export default function DeviceDetail() {
               </div>
             </div>
           </div>
+
+          {/* NPK Statistics */}
+          {user && paddyInfo && fieldInfo && (
+            <DeviceStatistics 
+              userId={user.uid}
+              fieldId={fieldInfo.id}
+              paddyId={paddyInfo.id}
+              deviceId={deviceId}
+              currentNPK={deviceInfo?.npk}
+            />
+          )}
 
           {/* Data Trends */}
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
@@ -684,5 +746,185 @@ export default function DeviceDetail() {
         )}
       </div>
     </ProtectedRoute>
+  );
+}
+
+// Device Statistics Component
+function DeviceStatistics({ 
+  userId, 
+  fieldId, 
+  paddyId, 
+  deviceId,
+  currentNPK 
+}: { 
+  userId: string; 
+  fieldId: string; 
+  paddyId: string;
+  deviceId: string;
+  currentNPK?: { n?: number; p?: number; k?: number; timestamp?: number };
+}) {
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const { getDeviceNPKStatistics } = await import('@/lib/utils/statistics');
+        const statistics = await getDeviceNPKStatistics(userId, fieldId, paddyId, deviceId, 30);
+        setStats(statistics);
+      } catch (error) {
+        console.error('Error fetching statistics:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, [userId, fieldId, paddyId, deviceId]);
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">NPK Statistics (30 Days)</h3>
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!stats) return null;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">NPK Statistics (30 Days)</h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Nitrogen Stats */}
+        <div className="bg-blue-50 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-blue-900">Nitrogen (N)</h4>
+            <span className="text-2xl">🧪</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-blue-700">Current:</span>
+              <span className="font-bold text-blue-900">
+                {stats.nitrogen.current !== null ? Math.round(stats.nitrogen.current) : '--'} mg/kg
+              </span>
+            </div>
+            {stats.nitrogen.average !== null && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-sm text-blue-700">Average:</span>
+                  <span className="font-medium text-blue-800">{Math.round(stats.nitrogen.average)} mg/kg</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-blue-700">Range:</span>
+                  <span className="text-xs text-blue-600">
+                    {Math.round(stats.nitrogen.min!)} - {Math.round(stats.nitrogen.max!)} mg/kg
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-blue-600">Trend:</span>
+                  <span className={`text-xs px-2 py-1 rounded ${
+                    stats.nitrogen.trend === 'up' ? 'bg-green-200 text-green-800' :
+                    stats.nitrogen.trend === 'down' ? 'bg-red-200 text-red-800' :
+                    'bg-gray-200 text-gray-800'
+                  }`}>
+                    {stats.nitrogen.trend === 'up' ? '↑ Increasing' :
+                     stats.nitrogen.trend === 'down' ? '↓ Decreasing' :
+                     '→ Stable'}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Phosphorus Stats */}
+        <div className="bg-purple-50 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-purple-900">Phosphorus (P)</h4>
+            <span className="text-2xl">⚗️</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-purple-700">Current:</span>
+              <span className="font-bold text-purple-900">
+                {stats.phosphorus.current !== null ? Math.round(stats.phosphorus.current) : '--'} mg/kg
+              </span>
+            </div>
+            {stats.phosphorus.average !== null && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-sm text-purple-700">Average:</span>
+                  <span className="font-medium text-purple-800">{Math.round(stats.phosphorus.average)} mg/kg</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-purple-700">Range:</span>
+                  <span className="text-xs text-purple-600">
+                    {Math.round(stats.phosphorus.min!)} - {Math.round(stats.phosphorus.max!)} mg/kg
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-purple-600">Trend:</span>
+                  <span className={`text-xs px-2 py-1 rounded ${
+                    stats.phosphorus.trend === 'up' ? 'bg-green-200 text-green-800' :
+                    stats.phosphorus.trend === 'down' ? 'bg-red-200 text-red-800' :
+                    'bg-gray-200 text-gray-800'
+                  }`}>
+                    {stats.phosphorus.trend === 'up' ? '↑ Increasing' :
+                     stats.phosphorus.trend === 'down' ? '↓ Decreasing' :
+                     '→ Stable'}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Potassium Stats */}
+        <div className="bg-orange-50 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-orange-900">Potassium (K)</h4>
+            <span className="text-2xl">🔬</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-orange-700">Current:</span>
+              <span className="font-bold text-orange-900">
+                {stats.potassium.current !== null ? Math.round(stats.potassium.current) : '--'} mg/kg
+              </span>
+            </div>
+            {stats.potassium.average !== null && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-sm text-orange-700">Average:</span>
+                  <span className="font-medium text-orange-800">{Math.round(stats.potassium.average)} mg/kg</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-orange-700">Range:</span>
+                  <span className="text-xs text-orange-600">
+                    {Math.round(stats.potassium.min!)} - {Math.round(stats.potassium.max!)} mg/kg
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-orange-600">Trend:</span>
+                  <span className={`text-xs px-2 py-1 rounded ${
+                    stats.potassium.trend === 'up' ? 'bg-green-200 text-green-800' :
+                    stats.potassium.trend === 'down' ? 'bg-red-200 text-red-800' :
+                    'bg-gray-200 text-gray-800'
+                  }`}>
+                    {stats.potassium.trend === 'up' ? '↑ Increasing' :
+                     stats.potassium.trend === 'down' ? '↓ Decreasing' :
+                     '→ Stable'}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
