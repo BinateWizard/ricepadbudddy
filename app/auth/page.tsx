@@ -31,11 +31,35 @@ export default function LoginPage() {
 
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      // Add email and profile scopes
+      provider.addScope('email');
+      provider.addScope('profile');
+      // Set custom parameters for better UX
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      
+      const result = await signInWithPopup(auth, provider);
+      console.log('Sign-in successful:', result.user.email);
       // User will be redirected by the useEffect above
     } catch (err: any) {
       console.error('Error signing in:', err);
-      setError(err.message || 'Failed to sign in with Google');
+      
+      // Provide user-friendly error messages
+      let errorMessage = 'Failed to sign in with Google';
+      if (err.code === 'auth/popup-closed-by-user') {
+        errorMessage = 'Sign-in was cancelled. Please try again.';
+      } else if (err.code === 'auth/popup-blocked') {
+        errorMessage = 'Popup was blocked. Please allow popups for this site and try again.';
+      } else if (err.code === 'auth/network-request-failed') {
+        errorMessage = 'Network error. Please check your internet connection and try again.';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        errorMessage = 'This domain is not authorized. Please contact support.';
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
       setLoading(false);
     }
   };

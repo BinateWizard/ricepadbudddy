@@ -2,8 +2,41 @@
   "rules": {
     "devices": {
       "$deviceId": {
+        // Read: Only authenticated users can read device data
         ".read": "auth != null",
-        ".write": "auth != null && (!data.child('connectedTo').exists() || data.child('connectedTo').val() == auth.uid)"
+        // Write: Allow ESP32 to write sensor data (npk, gps, heartbeat, status) without auth
+        // All other writes require authentication
+        ".write": false,
+        // NPK sensor data - ESP32 can write, users can read
+        "npk": {
+          ".read": "auth != null",
+          ".write": true
+        },
+        // GPS location data - ESP32 can write, users can read
+        "gps": {
+          ".read": "auth != null",
+          ".write": true
+        },
+        // Weather data - ESP32 can write, users can read
+        "weather": {
+          ".read": "auth != null",
+          ".write": true
+        },
+        // Heartbeat - ESP32 can write, users can read
+        "heartbeat": {
+          ".read": "auth != null",
+          ".write": true
+        },
+        // Status - ESP32 can write, users can read
+        "status": {
+          ".read": "auth != null",
+          ".write": true
+        },
+        // All other paths require authentication for writes
+        "$other": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
       }
     }
   }

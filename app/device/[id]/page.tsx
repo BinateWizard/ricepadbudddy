@@ -225,7 +225,7 @@ export default function DeviceDetail() {
       // Only add if we have actual NPK values
       if (data.n !== undefined || data.p !== undefined || data.k !== undefined) {
         const newLog = {
-          id: `rtdb-${Date.now()}`,
+          id: `rtdb-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           timestamp,
           nitrogen: data.n,
           phosphorus: data.p,
@@ -860,7 +860,7 @@ export default function DeviceDetail() {
                               const globalIndex = startIndex + index;
                               return (
                                 <tr 
-                                  key={log.id || `log-${globalIndex}`} 
+                                  key={`${log.id || 'log'}-${globalIndex}-${log.timestamp.getTime()}`} 
                                   className={`hover:bg-gray-50 transition-colors ${
                                     globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'bg-green-50' : ''
                                   }`}
@@ -906,7 +906,7 @@ export default function DeviceDetail() {
                           const globalIndex = startIndex + index;
                           return (
                             <div 
-                              key={log.id || `log-${globalIndex}`}
+                              key={`${log.id || 'log'}-${globalIndex}-${log.timestamp.getTime()}`}
                               className={`bg-white border rounded-lg p-4 shadow-sm ${
                                 globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'border-green-300 bg-green-50' : 'border-gray-200'
                               }`}
