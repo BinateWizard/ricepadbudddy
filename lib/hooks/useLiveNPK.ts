@@ -28,7 +28,7 @@ export function useLiveNPK(deviceId: string | null): LiveNPKState {
     data: null,
     online: false,
     loading: true,
-    error: null,
+    error: null
   });
 
   useEffect(() => {

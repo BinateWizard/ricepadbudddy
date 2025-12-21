@@ -1222,6 +1222,15 @@ export default function DeviceDetail() {
           </div>
         </main>
 
+        {/* Floating Action Button - Navigate to Add Field */}
+        <button 
+          onClick={() => router.push('/')}
+          className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-40"
+          title="Add New Field"
+        >
+          <span className="text-3xl font-light">+</span>
+        </button>
+
         {/* Location Modal */}
         {showLocationModal && (
           <>

@@ -585,7 +585,7 @@ export default function Home() {
                             setFieldName(e.target.value);
                             setErrors(prev => ({...prev, fieldName: ""}));
                           }}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
                             errors.fieldName ? 'border-red-400 bg-red-50' : 'border-gray-300'
                           }`}
                           placeholder="Enter field name"
@@ -610,7 +610,7 @@ export default function Home() {
                             setRiceVariety(e.target.value);
                             setErrors(prev => ({...prev, riceVariety: ""}));
                           }}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white ${
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
                             errors.riceVariety ? 'border-red-400 bg-red-50' : 'border-gray-300'
                           }`}
                         >
@@ -651,7 +651,7 @@ export default function Home() {
                             setStartDay(e.target.value);
                             setErrors(prev => ({...prev, startDay: ""}));
                           }}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
                             errors.startDay ? 'border-red-400 bg-red-50' : 'border-gray-300'
                           }`}
                         />
@@ -672,7 +672,7 @@ export default function Home() {
                         <textarea
                           value={fieldDescription}
                           onChange={(e) => setFieldDescription(e.target.value)}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none bg-white text-gray-900"
                           placeholder="Add notes about this field"
                           rows={3}
                         />
@@ -716,7 +716,7 @@ export default function Home() {
                             setPaddyName(e.target.value);
                             setErrors(prev => ({...prev, paddyName: ""}));
                           }}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
                             errors.paddyName ? 'border-red-400 bg-red-50' : 'border-gray-300'
                           }`}
                           placeholder="Enter paddy name"
@@ -742,7 +742,7 @@ export default function Home() {
                             setDeviceId(e.target.value);
                             setErrors(prev => ({...prev, deviceId: ""}));
                           }}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
                             errors.deviceId ? 'border-red-400 bg-red-50' : 'border-gray-300'
                           }`}
                           placeholder="e.g., DEVICE_0001"
@@ -774,7 +774,7 @@ export default function Home() {
                         <textarea
                           value={paddyDescription}
                           onChange={(e) => setPaddyDescription(e.target.value)}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none bg-white text-gray-900"
                           placeholder="Add notes about this paddy"
                           rows={3}
                         />

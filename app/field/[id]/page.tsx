@@ -622,7 +622,7 @@ export default function FieldDetail() {
                           setErrors(prev => ({...prev, paddyName: ""}));
                         }}
                         placeholder="e.g., North Paddy"
-                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
                           errors.paddyName ? 'border-red-400 bg-red-50' : 'border-gray-300'
                         }`}
                       />
@@ -645,7 +645,7 @@ export default function FieldDetail() {
                         onChange={(e) => setPaddyDescription(e.target.value)}
                         placeholder="Add any notes about this paddy"
                         rows={3}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none bg-white text-gray-900"
                       />
                     </div>
 
@@ -661,7 +661,7 @@ export default function FieldDetail() {
                           setErrors(prev => ({...prev, deviceId: ""}));
                         }}
                         placeholder="DEVICE_0001"
-                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono ${
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono bg-white text-gray-900 ${
                           errors.deviceId ? 'border-red-400 bg-red-50' : 'border-gray-300'
                         }`}
                       />
@@ -1195,13 +1195,6 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Connected Paddies</h2>
-        <button
-          onClick={onAddDevice}
-          className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-        >
-          <span className="text-lg">+</span>
-          Add Paddy
-        </button>
       </div>
       {paddies.length === 0 ? (
         <div className="bg-white rounded-xl shadow-md p-12 text-center">
@@ -1286,6 +1279,15 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
           })}
         </div>
       )}
+
+      {/* Floating Action Button - Add Paddy */}
+      <button 
+        onClick={onAddDevice}
+        className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-40"
+        title="Add New Paddy"
+      >
+        <span className="text-3xl font-light">+</span>
+      </button>
     </div>
   );
 }
