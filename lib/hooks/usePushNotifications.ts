@@ -57,6 +57,11 @@ export function usePushNotifications() {
       }
 
       // Get FCM token
+      if (!messaging) {
+        console.warn('Messaging not initialized');
+        return false;
+      }
+      
       const currentToken = await getToken(messaging, {
         vapidKey: VAPID_KEY,
         serviceWorkerRegistration: await navigator.serviceWorker.ready,
@@ -107,7 +112,7 @@ export function usePushNotifications() {
 
     const getExistingToken = async () => {
       try {
-        if (Notification.permission === 'granted') {
+        if (Notification.permission === 'granted' && messaging) {
           const currentToken = await getToken(messaging, {
             vapidKey: VAPID_KEY,
             serviceWorkerRegistration: await navigator.serviceWorker.ready,
