@@ -6,6 +6,7 @@
 
 import { database } from '@/lib/firebase';
 import { ref, update, get } from 'firebase/database';
+import { getDeviceRef } from '@/lib/utils/rtdbHelper';
 
 export interface DeviceCommand {
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C';
@@ -42,7 +43,11 @@ export async function sendDeviceCommand(
   userId: string
 ): Promise<CommandResult> {
   try {
-    const deviceRef = ref(database, `devices/${deviceId}`);
+    const result = await getDeviceRef(deviceId);
+    if (!result) {
+      return { success: false, message: `Could not get ref for ${deviceId}` };
+    }
+    const { ref: deviceRef } = result;
 
     const now = Date.now();
 
@@ -104,7 +109,11 @@ async function waitForAcknowledgment(
 
   while (Date.now() - startTime < timeout) {
     try {
-      const commandRef = ref(database, `devices/${deviceId}/commands/${nodeId}`);
+      const result = await getDeviceRef(deviceId, `commands/${nodeId}`);
+      if (!result) {
+        throw new Error(`Could not get ref for ${deviceId}`);
+      }
+      const { ref: commandRef } = result;
       const snapshot = await get(commandRef);
 
       if (snapshot.exists()) {
@@ -279,7 +288,9 @@ export async function getCommandStatus(
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C'
 ): Promise<DeviceCommand | null> {
   try {
-    const commandRef = ref(database, `devices/${deviceId}/commands/${nodeId}`);
+    const result = await getDeviceRef(deviceId, `commands/${nodeId}`);
+    if (!result) return null;
+    const { ref: commandRef } = result;
     const snapshot = await get(commandRef);
 
     if (snapshot.exists()) {
@@ -300,7 +311,9 @@ export async function getNodeStatus(
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C'
 ): Promise<{ status: string; lastSeen: number } | null> {
   try {
-    const nodeRef = ref(database, `devices/${deviceId}/nodes/${nodeId}`);
+    const result = await getDeviceRef(deviceId, `nodes/${nodeId}`);
+    if (!result) return null;
+    const { ref: nodeRef } = result;
     const snapshot = await get(nodeRef);
 
     if (snapshot.exists()) {

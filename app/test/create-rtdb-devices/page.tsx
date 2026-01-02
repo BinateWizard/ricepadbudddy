@@ -13,16 +13,19 @@ export default function CreateRTDBDevices() {
     setStatus('Creating devices in Realtime Database...');
 
     try {
-      // Create DEVICE_0001 in RTDB
+      // Create DEVICE_0001 in RTDB (using correct structure that Cloud Functions expect)
       await set(ref(database, 'devices/DEVICE_0001'), {
         deviceId: 'DEVICE_0001',
         name: 'Test Device 1',
-        status: 'available',
-        sensorData: {
-          temperature: 0,
-          humidity: 0,
-          soilMoisture: 0,
-          lastUpdate: null
+        status: 'online',
+        heartbeat: Date.now(),
+        sensors: {  // Changed from 'sensorData' to 'sensors'
+          nitrogen: 45.2,
+          phosphorus: 12.8,
+          potassium: 38.5,
+          temperature: 28.5,
+          humidity: 75.0,
+          lastUpdate: Date.now()
         }
       });
       setStatus(prev => prev + '\n✅ Created DEVICE_0001 in RTDB');
@@ -31,31 +34,37 @@ export default function CreateRTDBDevices() {
       await set(ref(database, 'devices/DEVICE_0002'), {
         deviceId: 'DEVICE_0002',
         name: 'Test Device 2',
-        status: 'available',
-        sensorData: {
-          temperature: 0,
-          humidity: 0,
-          soilMoisture: 0,
-          lastUpdate: null
+        status: 'online',
+        heartbeat: Date.now(),
+        sensors: {  // Changed from 'sensorData' to 'sensors'
+          nitrogen: 52.1,
+          phosphorus: 15.3,
+          potassium: 42.7,
+          temperature: 29.0,
+          humidity: 72.5,
+          lastUpdate: Date.now()
         }
       });
       setStatus(prev => prev + '\n✅ Created DEVICE_0002 in RTDB');
 
-      // Create DEVICE_0003 in RTDB
+      // Create DEVICE_0003 in RTDB (FIXED - same structure as others)
       await set(ref(database, 'devices/DEVICE_0003'), {
         deviceId: 'DEVICE_0003',
         name: 'Test Device 3',
-        status: 'available',
-        sensorData: {
-          temperature: 0,
-          humidity: 0,
-          soilMoisture: 0,
-          lastUpdate: null
+        status: 'online',
+        heartbeat: Date.now(),
+        sensors: {  // Changed from 'sensorData' to 'sensors'
+          nitrogen: 38.9,
+          phosphorus: 11.2,
+          potassium: 35.4,
+          temperature: 27.8,
+          humidity: 78.2,
+          lastUpdate: Date.now()
         }
       });
-      setStatus(prev => prev + '\n✅ Created DEVICE_0003 in RTDB');
+      setStatus(prev => prev + '\n✅ Created DEVICE_0003 in RTDB (FIXED!)');
 
-      setStatus(prev => prev + '\n\n✨ All devices created in Realtime Database!\n\nDevices are now at:\n  - rtdb/devices/DEVICE_0001\n  - rtdb/devices/DEVICE_0002\n  - rtdb/devices/DEVICE_0003\n\nYour ESP32 can write sensor data to these paths.');
+      setStatus(prev => prev + '\n\n✨ All devices created in Realtime Database!\n\nDevices structure:\n  - rtdb/devices/DEVICE_0001/sensors\n  - rtdb/devices/DEVICE_0002/sensors\n  - rtdb/devices/DEVICE_0003/sensors\n\nCloud Functions will now read these correctly.\n\n⚠️ NOTE: See NEW_RTDB_STRUCTURE.md for the recommended\nowners/fields/devices hierarchy with command support.');
     } catch (error: any) {
       setStatus(prev => prev + `\n\n❌ Error: ${error.message}`);
     } finally {

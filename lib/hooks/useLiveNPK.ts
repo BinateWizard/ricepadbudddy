@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ref, onValue } from 'firebase/database';
 import { database } from '@/lib/firebase';
+import { onDeviceValue } from '@/lib/utils/rtdbHelper';
 
 export interface LiveNPKData {
   n?: number;
@@ -40,21 +41,19 @@ export function useLiveNPK(deviceId: string | null): LiveNPKState {
 
     console.log('[useLiveNPK] Subscribing to device:', deviceId);
     
-    // Subscribe to entire device node to check status and connectedAt
-    const deviceRef = ref(database, `devices/${deviceId}`);
-    
-    const unsubscribe = onValue(
-      deviceRef,
-      (snapshot) => {
-        console.log('[useLiveNPK] Received snapshot, exists:', snapshot.exists());
+    // Subscribe to entire device node to check status and connectedAt (with fallback to new RTDB structure)
+    const unsubscribe = onDeviceValue(
+      deviceId,
+      '',
+      (deviceData) => {
+        console.log('[useLiveNPK] Received device data:', deviceData ? 'exists' : 'null');
         
-        if (!snapshot.exists()) {
+        if (!deviceData) {
           console.log('[useLiveNPK] Device not found in RTDB');
           setState({ data: null, online: false, loading: false, error: null });
           return;
         }
-
-        const deviceData = snapshot.val();
+        
         console.log('[useLiveNPK] Device data:', deviceData);
         
         const rawNpk = deviceData.npk || {};

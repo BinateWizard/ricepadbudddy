@@ -22,16 +22,37 @@ export const scheduledSensorLogger = functions.pubsub
     const database = admin.database();
     
     try {
-      // Get all devices from RTDB
-      const devicesRef = database.ref('devices');
-      const devicesSnapshot = await devicesRef.once('value');
-      
-      if (!devicesSnapshot.exists()) {
-        console.log('[Scheduled] No devices found in RTDB');
-        return null;
+      // Prefer new hierarchy: owners/{ownerId}/fields/{fieldId}/devices/{deviceId}
+      // Fallback to legacy: devices/{deviceId}
+      const devices: Record<string, any> = {};
+
+      const ownersSnap = await database.ref('owners').once('value');
+      if (ownersSnap.exists()) {
+        const owners = ownersSnap.val();
+        for (const [ownerId, ownerData] of Object.entries(owners) as [string, any][]) {
+          const fields = ownerData.fields || {};
+          for (const [fieldId, fieldData] of Object.entries(fields) as [string, any][]) {
+            const fieldDevices = fieldData.devices || {};
+            for (const [deviceId, deviceData] of Object.entries(fieldDevices) as [string, any][]) {
+              devices[deviceId] = {
+                ...deviceData,
+                __meta: { ownerId, fieldId, path: 'owners' },
+              };
+            }
+          }
+        }
       }
 
-      const devices = devicesSnapshot.val();
+      // Legacy fallback
+      if (Object.keys(devices).length === 0) {
+        const legacySnap = await database.ref('devices').once('value');
+        if (!legacySnap.exists()) {
+          console.log('[Scheduled] No devices found in RTDB (owners/ or devices/)');
+          return null;
+        }
+        Object.assign(devices, legacySnap.val());
+      }
+
       let totalLogged = 0;
 
       // Process each device
@@ -41,6 +62,21 @@ export const scheduledSensorLogger = functions.pubsub
           const npk = deviceData.npk || deviceData.sensors || deviceData.readings;
           
           if (!npk) {
+            // Log error: No sensor data found
+            console.warn(`[Scheduled] No sensor data for device ${deviceId}`);
+            await firestore.collection('errors').add({
+              deviceId: deviceId,
+              type: 'sensor_read_failed',
+              severity: 'warning',
+              message: `Device ${deviceId} has no sensor data in RTDB`,
+              details: {
+                availableKeys: Object.keys(deviceData),
+                checkedAt: Date.now()
+              },
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              resolved: false,
+              notified: false
+            });
             continue; // Skip devices without sensor data
           }
 
@@ -52,6 +88,17 @@ export const scheduledSensorLogger = functions.pubsub
 
           // Skip if no actual readings
           if (nitrogen === null && phosphorus === null && potassium === null) {
+            console.warn(`[Scheduled] Device ${deviceId} has null/empty sensor values`);
+            await firestore.collection('errors').add({
+              deviceId: deviceId,
+              type: 'invalid_data',
+              severity: 'warning',
+              message: `Device ${deviceId} has incomplete sensor data (all null)`,
+              details: { nitrogen, phosphorus, potassium },
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              resolved: false,
+              notified: false
+            });
             continue;
           }
 
@@ -63,6 +110,16 @@ export const scheduledSensorLogger = functions.pubsub
 
           if (paddiesSnapshot.empty) {
             console.log(`[Scheduled] No paddies found for device ${deviceId}`);
+            // Only log as info-level error (not critical)
+            await firestore.collection('errors').add({
+              deviceId: deviceId,
+              type: 'device_unassigned',
+              severity: 'info',
+              message: `Device ${deviceId} is not assigned to any paddy`,
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              resolved: false,
+              notified: false
+            });
             continue;
           }
 
@@ -339,16 +396,36 @@ export const deviceHealthMonitor = functions.pubsub
     try {
       console.log('[Health Monitor] Starting device health check...');
 
-      // Get all devices from RTDB
-      const devicesRef = database.ref('devices');
-      const devicesSnapshot = await devicesRef.once('value');
+      // Prefer new hierarchy: owners/{ownerId}/fields/{fieldId}/devices/{deviceId}
+      // Fallback to legacy: devices/{deviceId}
+      const devices: Record<string, any> = {};
 
-      if (!devicesSnapshot.exists()) {
-        console.log('[Health Monitor] No devices found');
-        return null;
+      const ownersSnap = await database.ref('owners').once('value');
+      if (ownersSnap.exists()) {
+        const owners = ownersSnap.val();
+        for (const [ownerId, ownerData] of Object.entries(owners) as [string, any][]) {
+          const fields = ownerData.fields || {};
+          for (const [fieldId, fieldData] of Object.entries(fields) as [string, any][]) {
+            const fieldDevices = fieldData.devices || {};
+            for (const [deviceId, deviceData] of Object.entries(fieldDevices) as [string, any][]) {
+              devices[deviceId] = {
+                ...deviceData,
+                __meta: { ownerId, fieldId, path: 'owners' },
+              };
+            }
+          }
+        }
       }
 
-      const devices = devicesSnapshot.val();
+      // Legacy fallback
+      if (Object.keys(devices).length === 0) {
+        const legacySnap = await database.ref('devices').once('value');
+        if (!legacySnap.exists()) {
+          console.log('[Health Monitor] No devices found (owners/ or devices/)');
+          return null;
+        }
+        Object.assign(devices, legacySnap.val());
+      }
       const now = Date.now();
       const offlineThreshold = 10 * 60 * 1000; // 10 minutes
 
@@ -357,12 +434,25 @@ export const deviceHealthMonitor = functions.pubsub
 
       for (const [deviceId, deviceData] of Object.entries(devices) as [string, any][]) {
         try {
-          // Get heartbeat (convert from seconds if needed)
-          const heartbeat = deviceData.heartbeat || 0;
+          // Get heartbeat with multiple fallbacks
+          let heartbeat = deviceData.heartbeat || deviceData.status?.heartbeat || 0;
+          
+          // Validate heartbeat exists and is not too old (> 30 days = likely invalid)
+          if (!heartbeat || heartbeat === 0) {
+            console.log(`[Health Monitor] Device ${deviceId} has no heartbeat timestamp`);
+            heartbeat = 0; // Mark as never seen
+          }
+          
+          // Convert from seconds to milliseconds if needed
           const heartbeatMs = heartbeat < 1e11 ? heartbeat * 1000 : heartbeat;
           const timeSinceHeartbeat = now - heartbeatMs;
+          
+          // Check if timestamp is in the future (clock sync issue)
+          if (timeSinceHeartbeat < 0) {
+            console.warn(`[Health Monitor] Device ${deviceId} has future timestamp (clock sync issue)`);
+          }
 
-          const isOffline = timeSinceHeartbeat > offlineThreshold;
+          const isOffline = heartbeat === 0 || timeSinceHeartbeat > offlineThreshold;
 
           // Update device status in Firestore
           const deviceRef = firestore.collection('devices').doc(deviceId);
@@ -373,15 +463,18 @@ export const deviceHealthMonitor = functions.pubsub
           await deviceRef.set(
             {
               status: isOffline ? 'offline' : 'online',
-              lastHeartbeat: admin.firestore.Timestamp.fromMillis(heartbeatMs),
+              lastHeartbeat: heartbeat > 0 ? admin.firestore.Timestamp.fromMillis(heartbeatMs) : null,
               lastHealthCheck: admin.firestore.FieldValue.serverTimestamp(),
               timeSinceHeartbeat: timeSinceHeartbeat,
+              isAlive: !isOffline,
+              lastSeenHumanReadable: heartbeat > 0 ? new Date(heartbeatMs).toISOString() : 'Never',
             },
             { merge: true }
           );
 
           if (isOffline) {
             offlineCount++;
+            console.log(`[Health Monitor] Device ${deviceId} OFFLINE - Last seen: ${Math.floor(timeSinceHeartbeat / 60000)} min ago`);
           } else {
             onlineCount++;
           }

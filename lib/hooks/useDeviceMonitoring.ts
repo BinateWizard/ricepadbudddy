@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { database } from '@/lib/firebase';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, get } from 'firebase/database';
 import { notifyDeviceOffline, notifyDeviceOnline } from '@/lib/utils/notifications';
+import { onDeviceValue, getDeviceData } from '@/lib/utils/rtdbHelper';
 
 interface DeviceMonitorConfig {
   userId: string;
@@ -43,15 +44,12 @@ export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
         lastNotificationTimeRef.current[deviceId] = 0;
       }
 
-      // Listen to device data in real-time
-      const deviceRef = ref(database, `devices/${deviceId}`);
-      const unsubscribe = onValue(deviceRef, (snapshot) => {
-        if (!snapshot.exists()) {
+      // Listen to device data in real-time (with fallback to new RTDB structure)
+      const unsubscribe = onDeviceValue(deviceId, '', (deviceData) => {
+        if (!deviceData) {
           checkAndNotify(userId, deviceId, paddyName, fieldId, fieldName, false, false);
           return;
         }
-
-        const deviceData = snapshot.val();
         const now = Date.now();
 
         // Check heartbeat (status + timestamp)
@@ -81,17 +79,15 @@ export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
 
       unsubscribers.push(unsubscribe);
 
-      // Periodic check every 30 seconds
-      const intervalId = setInterval(() => {
+      // Periodic check every 60 seconds (with fallback to new RTDB structure)
+      const intervalId = setInterval(async () => {
         // Re-fetch and check status
-        const deviceRef = ref(database, `devices/${deviceId}`);
-        onValue(deviceRef, (snapshot) => {
-          if (!snapshot.exists()) {
-            checkAndNotify(userId, deviceId, paddyName, fieldId, fieldName, false, false);
-            return;
-          }
-
-          const deviceData = snapshot.val();
+        const deviceData = await getDeviceData(deviceId, '');
+        
+        if (!deviceData) {
+          checkAndNotify(userId, deviceId, paddyName, fieldId, fieldName, false, false);
+          return;
+        }
           const now = Date.now();
 
           const hasHeartbeat = deviceData.status === 'connected' || deviceData.status === 'alive';
@@ -112,7 +108,6 @@ export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
           );
 
           checkAndNotify(userId, deviceId, paddyName, fieldId, fieldName, isOnline, hasNPK);
-        }, { onlyOnce: true });
       }, CHECK_INTERVAL);
 
       monitorIntervals.push(intervalId);

@@ -1,5 +1,6 @@
 import { ref, get, set, update, onValue } from 'firebase/database';
 import { database } from '@/lib/firebase';
+import { getDeviceRef } from '@/lib/utils/rtdbHelper';
 
 export interface DeviceAction {
   action?: string;
@@ -30,7 +31,12 @@ export async function sendDeviceAction(
   command: string
 ): Promise<boolean> {
   try {
-    const deviceRef = ref(database, `devices/${deviceId}`);
+    const result = await getDeviceRef(deviceId);
+    if (!result) {
+      console.error(`[Device Action] Could not get ref for ${deviceId}`);
+      return false;
+    }
+    const { ref: deviceRef } = result;
     
     await update(deviceRef, {
       action: command,
@@ -56,12 +62,17 @@ export async function sendDeviceAction(
  * Returns a promise that resolves when action is complete
  * or rejects if timeout/error occurs
  */
-export function waitForDeviceActionComplete(
+export async function waitForDeviceActionComplete(
   deviceId: string,
   timeoutMs: number = 15000
 ): Promise<DeviceAction> {
-  return new Promise((resolve, reject) => {
-    const deviceRef = ref(database, `devices/${deviceId}`);
+  return new Promise(async (resolve, reject) => {
+    const result = await getDeviceRef(deviceId);
+    if (!result) {
+      reject(new Error(`Could not get ref for ${deviceId}`));
+      return;
+    }
+    const { ref: deviceRef } = result;
     let unsubscribe: (() => void) | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
     let hasAcknowledged = false;
@@ -132,7 +143,9 @@ export async function executeDeviceAction(
  */
 export async function getDeviceActionStatus(deviceId: string): Promise<DeviceAction | null> {
   try {
-    const deviceRef = ref(database, `devices/${deviceId}`);
+    const result = await getDeviceRef(deviceId);
+    if (!result) return null;
+    const { ref: deviceRef } = result;
     const snapshot = await get(deviceRef);
     
     if (!snapshot.exists()) {
@@ -151,7 +164,9 @@ export async function getDeviceActionStatus(deviceId: string): Promise<DeviceAct
  */
 export async function resetDeviceAction(deviceId: string): Promise<boolean> {
   try {
-    const deviceRef = ref(database, `devices/${deviceId}`);
+    const result = await getDeviceRef(deviceId);
+    if (!result) return false;
+    const { ref: deviceRef } = result;
     await update(deviceRef, {
       action: 'none',
       actionTaken: false,

@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { ref, get, onValue, set } from 'firebase/database';
+import { getDeviceData, onDeviceValue } from '@/lib/utils/rtdbHelper';
 import NotificationBell from "@/components/NotificationBell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,11 +84,9 @@ export default function DeviceDetail() {
       try {
         // Strategy 1: Check for device sensor data first (most accurate)
         try {
-          const sensorsRef = ref(database, `devices/${deviceId}/sensors`);
-          const sensorsSnapshot = await get(sensorsRef);
+          const sensors = await getDeviceData(deviceId, 'sensors');
           
-          if (sensorsSnapshot.exists()) {
-            const sensors = sensorsSnapshot.val();
+          if (sensors) {
             if (sensors.temperature !== undefined || sensors.humidity !== undefined) {
               console.log('[Weather] Using device sensor data');
               setWeatherData({
@@ -106,11 +105,9 @@ export default function DeviceDetail() {
         
         // Strategy 2: Try cached weather data from RTDB (if available and recent)
         try {
-          const weatherRef = ref(database, `devices/${deviceId}/weather`);
-          const weatherSnapshot = await get(weatherRef);
+          const cachedWeather = await getDeviceData(deviceId, 'weather');
           
-          if (weatherSnapshot.exists()) {
-            const cachedWeather = weatherSnapshot.val();
+          if (cachedWeather) {
             const cacheAge = Date.now() - (cachedWeather.timestamp || 0);
             const maxCacheAge = 10 * 60 * 1000; // 10 minutes
             
@@ -147,11 +144,9 @@ export default function DeviceDetail() {
         
         // Try gps path first (preferred format)
         try {
-          const gpsRef = ref(database, `devices/${deviceId}/gps`);
-          const gpsSnapshot = await get(gpsRef);
+          const gps = await getDeviceData(deviceId, 'gps');
           
-          if (gpsSnapshot.exists()) {
-            const gps = gpsSnapshot.val();
+          if (gps) {
             lat = gps.lat ?? null;
             lng = gps.lng ?? null;
             console.log('[Weather] GPS data from gps path:', { lat, lng });
@@ -163,11 +158,9 @@ export default function DeviceDetail() {
         // Fallback to location path if gps path didn't work
         if (!lat || !lng) {
           try {
-            const locationRef = ref(database, `devices/${deviceId}/location`);
-            const locationSnapshot = await get(locationRef);
+            const location = await getDeviceData(deviceId, 'location');
             
-            if (locationSnapshot.exists()) {
-              const location = locationSnapshot.val();
+            if (location) {
               lat = location.latitude ?? location.lat ?? null;
               lng = location.longitude ?? location.lng ?? null;
               console.log('[Weather] GPS data from location path:', { lat, lng });
@@ -267,11 +260,9 @@ export default function DeviceDetail() {
   useEffect(() => {
     if (!deviceId) return;
 
-    const npkRef = ref(database, `devices/${deviceId}/npk`);
-    const unsubscribe = onValue(npkRef, (snapshot) => {
-      if (!snapshot.exists()) return;
+    const unsubscribe = onDeviceValue(deviceId, 'npk', (data) => {
+      if (!data) return;
       
-      const data = snapshot.val();
       // Use ESP32 timestamp if valid (in milliseconds), otherwise use current time
       const timestamp = data.timestamp && data.timestamp > 1700000000000 
         ? new Date(data.timestamp) 
@@ -487,19 +478,15 @@ export default function DeviceDetail() {
       if (!deviceId) return;
       
       try {
-        const gpsRef = ref(database, `devices/${deviceId}/gps`);
-        const snapshot = await get(gpsRef);
+        const gps = await getDeviceData(deviceId, 'gps');
         
-        if (snapshot.exists()) {
-          const gps = snapshot.val();
+        if (gps) {
           setGpsData(gps);
         } else {
           // Try location path as fallback
-          const locationRef = ref(database, `devices/${deviceId}/location`);
-          const locationSnapshot = await get(locationRef);
+          const location = await getDeviceData(deviceId, 'location');
           
-          if (locationSnapshot.exists()) {
-            const location = locationSnapshot.val();
+          if (location) {
             setGpsData({
               lat: location.latitude ?? location.lat,
               lng: location.longitude ?? location.lng,
@@ -515,10 +502,9 @@ export default function DeviceDetail() {
     fetchGPSData();
     
     // Set up real-time listener for GPS updates
-    const gpsRef = ref(database, `devices/${deviceId}/gps`);
-    const unsubscribe = onValue(gpsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setGpsData(snapshot.val());
+    const unsubscribe = onDeviceValue(deviceId, 'gps', (gps) => {
+      if (gps) {
+        setGpsData(gps);
       }
     });
     
@@ -557,11 +543,9 @@ export default function DeviceDetail() {
     
     try {
       // Fetch GPS coordinates from Firebase RTDB
-      const gpsRef = ref(database, `devices/${deviceId}/gps`);
-      const snapshot = await get(gpsRef);
+      const gps = await getDeviceData(deviceId, 'gps');
       
-      if (snapshot.exists()) {
-        const gps = snapshot.val();
+      if (gps) {
         setGpsData(gps);
       }
     } catch (error) {
