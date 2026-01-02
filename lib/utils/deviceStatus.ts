@@ -1,5 +1,6 @@
 import { database } from '@/lib/firebase';
 import { ref, get } from 'firebase/database';
+import { getDeviceData as rtdbGetDeviceData } from '@/lib/utils/rtdbHelper';
 
 /**
  * RTDB Structure:
@@ -68,14 +69,13 @@ export interface DeviceStatusResult {
  */
 export async function getDeviceData(deviceId: string): Promise<DeviceData | null> {
   try {
-    const deviceRef = ref(database, `devices/${deviceId}`);
-    const snapshot = await get(deviceRef);
+    const raw = await rtdbGetDeviceData(deviceId, '');
     
-    if (!snapshot.exists()) {
+    if (!raw) {
       return null;
     }
     
-    const raw = snapshot.val() as DeviceData & { readings?: any; sensors?: any };
+    const deviceData = raw as DeviceData & { readings?: any; sensors?: any };
 
     const normalizeNpk = (data: any): DeviceNPK | undefined => {
       const source = data?.npk || data?.readings || data?.sensors || data;

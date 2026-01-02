@@ -9,6 +9,7 @@ import { getVarietyNames } from "@/lib/utils/varietyHelpers";
 import { db, database } from "@/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, updateDoc, serverTimestamp, query, getDocs, orderBy } from "firebase/firestore";
 import { ref, get, update } from "firebase/database";
+import { getDeviceData, onDeviceValue } from "@/lib/utils/rtdbHelper";
 import NotificationBell from "@/components/NotificationBell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -151,12 +152,9 @@ export default function Home() {
             
             if (paddyData.deviceId) {
               try {
-                const deviceRef = ref(database, `devices/${paddyData.deviceId}`);
-                const deviceSnap = await get(deviceRef);
+                const deviceData = await getDeviceData(paddyData.deviceId, '');
                 
-                if (deviceSnap.exists()) {
-                  const deviceData = deviceSnap.val();
-                  
+                if (deviceData) {
                   // Check if device has status = "connected" or recent timestamp
                   hasHeartbeat = deviceData.status === 'connected' || 
                     deviceData.status === 'alive' ||
@@ -282,11 +280,9 @@ export default function Home() {
           await executeDeviceAction(deviceId, 'scan', 15000);
           
           // Fetch NPK data from RTDB after successful scan
-          const npkRef = ref(database, `devices/${deviceId}/npk`);
-          const npkSnap = await get(npkRef);
+          const npkData = await getDeviceData(deviceId, 'npk');
           
-          if (npkSnap.exists()) {
-            const npkData = npkSnap.val();
+          if (npkData) {
             return {
               deviceId,
               npk: {
@@ -395,17 +391,15 @@ export default function Home() {
     // Verify device exists in RTDB
     setIsVerifying(true);
     try {
-      const deviceRef = ref(database, `devices/${deviceId}`);
-      const deviceSnap = await get(deviceRef);
+      const deviceData = await getDeviceData(deviceId, '');
       
-      if (!deviceSnap.exists()) {
+      if (!deviceData) {
         setErrors({ deviceId: "Device not found. Please check the ID" });
         setIsVerifying(false);
         return;
       }
       
       // Check if device is already owned by another user
-      const deviceData = deviceSnap.val();
       if (deviceData?.ownedBy && deviceData.ownedBy !== user?.uid) {
         setErrors({ deviceId: "Device is already owned by another user. Access restricted due to policy changes." });
         setIsVerifying(false);
@@ -467,6 +461,7 @@ export default function Home() {
       });
       
       // 4. Update device in RTDB to mark it as connected to this user
+      const deviceRef = ref(database, `devices/${deviceId}`);
       await update(deviceRef, {
         ownedBy: user.uid,
         connectedTo: user.uid,

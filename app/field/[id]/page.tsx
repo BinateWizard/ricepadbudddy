@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, updateDoc, setDoc, query, where, orderBy, onSnapshot, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
+import { getDeviceData } from '@/lib/utils/rtdbHelper';
 import {
   Chart as ChartJS,
   LineElement,
@@ -169,7 +170,6 @@ export default function FieldDetail() {
 
     try {
       const { executeDeviceAction } = await import('@/lib/utils/deviceActions');
-      const { ref, get } = await import('firebase/database');
       
       const scanPromises = devicesToScan.map(async (deviceId) => {
         try {
@@ -177,11 +177,9 @@ export default function FieldDetail() {
           await executeDeviceAction(deviceId, 'scan', 15000);
           
           // Fetch NPK data from RTDB after successful scan
-          const npkRef = ref(database, `devices/${deviceId}/npk`);
-          const npkSnap = await get(npkRef);
+          const npkData = await getDeviceData(deviceId, 'npk');
           
-          if (npkSnap.exists()) {
-            const npkData = npkSnap.val();
+          if (npkData) {
             return {
               deviceId,
               npk: {

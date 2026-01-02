@@ -2,6 +2,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { database } from '@/lib/firebase';
 import { ref, get } from 'firebase/database';
+import { getDeviceData as rtdbGetDeviceData } from '@/lib/utils/rtdbHelper';
 import { DeviceNPK, DeviceData } from './deviceStatus';
 
 export interface NPKStatistics {
@@ -263,17 +264,11 @@ export async function getFieldNPKStatistics(
   }
 }
 
-// Helper function to get device data (re-export from deviceStatus)
+// Helper function to get device data (uses fallback helper)
 async function getDeviceData(deviceId: string): Promise<DeviceData | null> {
   try {
-    const deviceRef = ref(database, `devices/${deviceId}`);
-    const snapshot = await get(deviceRef);
-    
-    if (!snapshot.exists()) {
-      return null;
-    }
-    
-    return snapshot.val() as DeviceData;
+    const data = await rtdbGetDeviceData(deviceId, '');
+    return data as DeviceData | null;
   } catch (error) {
     console.error(`Error fetching device data for ${deviceId}:`, error);
     return null;
