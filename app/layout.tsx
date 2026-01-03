@@ -40,6 +40,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const enableServiceWorker = process.env.NODE_ENV === 'production';
+
   return (
     <html lang="en">
       <head>
@@ -57,60 +59,62 @@ export default function RootLayout({
             {children}
           </NotificationProvider>
         </AuthProvider>
-        <script dangerouslySetInnerHTML={{
-          __html: `
-            if ('serviceWorker' in navigator) {
-              window.addEventListener('load', function() {
-                navigator.serviceWorker.register('/service-worker.js').then(
-                  function(registration) {
-                    console.log('[PWA] ServiceWorker registration successful');
-                    
-                    // Check for updates periodically
-                    setInterval(function() {
-                      registration.update();
-                    }, 60000); // Check every minute
-                    
-                    // Handle updates
-                    registration.addEventListener('updatefound', function() {
-                      var newWorker = registration.installing;
-                      console.log('[PWA] New service worker found');
+        {enableServiceWorker && (
+          <script dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/service-worker.js').then(
+                    function(registration) {
+                      console.log('[PWA] ServiceWorker registration successful');
                       
-                      newWorker.addEventListener('statechange', function() {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                          // New content available, show update prompt
-                          console.log('[PWA] New content available');
-                          if (confirm('May bagong update ang PadBuddy! I-refresh para makuha ang latest version.')) {
-                            newWorker.postMessage({ type: 'SKIP_WAITING' });
-                            window.location.reload();
+                      // Check for updates periodically
+                      setInterval(function() {
+                        registration.update();
+                      }, 60000); // Check every minute
+                      
+                      // Handle updates
+                      registration.addEventListener('updatefound', function() {
+                        var newWorker = registration.installing;
+                        console.log('[PWA] New service worker found');
+                        
+                        newWorker.addEventListener('statechange', function() {
+                          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New content available, show update prompt
+                            console.log('[PWA] New content available');
+                            if (confirm('May bagong update ang PadBuddy! I-refresh para makuha ang latest version.')) {
+                              newWorker.postMessage({ type: 'SKIP_WAITING' });
+                              window.location.reload();
+                            }
                           }
-                        }
+                        });
                       });
-                    });
-                  },
-                  function(err) {
-                    console.log('[PWA] ServiceWorker registration failed: ', err);
-                  }
-                );
-                
-                // Handle controller change
-                navigator.serviceWorker.addEventListener('controllerchange', function() {
-                  console.log('[PWA] Controller changed');
+                    },
+                    function(err) {
+                      console.log('[PWA] ServiceWorker registration failed: ', err);
+                    }
+                  );
+                  
+                  // Handle controller change
+                  navigator.serviceWorker.addEventListener('controllerchange', function() {
+                    console.log('[PWA] Controller changed');
+                  });
                 });
-              });
-              
-              // Log online/offline status
-              window.addEventListener('online', function() {
-                console.log('[PWA] Back online');
-                document.body.classList.remove('offline');
-              });
-              
-              window.addEventListener('offline', function() {
-                console.log('[PWA] Gone offline');
-                document.body.classList.add('offline');
-              });
-            }
-          `
-        }} />
+                
+                // Log online/offline status
+                window.addEventListener('online', function() {
+                  console.log('[PWA] Back online');
+                  document.body.classList.remove('offline');
+                });
+                
+                window.addEventListener('offline', function() {
+                  console.log('[PWA] Gone offline');
+                  document.body.classList.add('offline');
+                });
+              }
+            `
+          }} />
+        )}
       </body>
     </html>
   );

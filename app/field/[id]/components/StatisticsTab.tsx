@@ -177,28 +177,30 @@ export function StatisticsTab({ paddies, deviceReadings, fieldId, setDeviceReadi
     setFieldStats(stats);
   }, [deviceReadings, historicalLogs]);
 
-  // Manual log function - logs current readings immediately
+  // Manual log function - Cloud Functions automatically log sensor data
+  // This triggers ESP32 to write data to RTDB, which Cloud Functions then log to Firestore
   const handleManualLog = async () => {
     if (!user) return;
     
     setIsLogging(true);
     try {
-      const { logSensorReadings } = await import('@/lib/utils/sensorLogging');
+      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
       let loggedCount = 0;
       
       for (const reading of deviceReadings) {
         if (reading.npk && (reading.npk.n !== undefined || reading.npk.p !== undefined || reading.npk.k !== undefined)) {
           const paddy = paddies.find(p => p.deviceId === reading.deviceId);
           if (paddy) {
-            console.log(`[Manual Log] Logging ${reading.deviceId}:`, reading.npk);
-            await logSensorReadings(user.uid, fieldId, paddy.id, reading.npk);
+            console.log(`[Manual Log] Triggering scan for ${reading.deviceId}`);
+            // Send scan command to ESP32C (NPK sensor)
+            await sendDeviceCommand(reading.deviceId, 'ESP32C', 'npk', 'scan', {}, '');
             loggedCount++;
           }
         }
       }
       
       if (loggedCount > 0) {
-        alert(`Successfully logged ${loggedCount} reading(s) to history!`);
+        alert(`Successfully triggered ${loggedCount} device scan(s)! Readings will be logged automatically.`);
         // Refresh historical logs by re-triggering the fetch
         const currentRange = timeRange;
         setTimeRange('7d');

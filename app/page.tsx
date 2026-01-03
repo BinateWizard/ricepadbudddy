@@ -18,7 +18,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import Banner from "@/components/Banner";
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
-import { useDeviceMonitoring } from "@/lib/hooks/useDeviceMonitoring";
 
 // Admin email for access control
 const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
@@ -242,19 +241,8 @@ export default function Home() {
     }
   }, [user, loading]);
 
-  // Monitor all devices for offline status
-  useDeviceMonitoring(
-    fields.flatMap(field => 
-      field.paddies?.map((paddy: any) => ({
-        userId: user?.uid || '',
-        deviceId: paddy.deviceId,
-        paddyName: paddy.paddyName,
-        fieldId: field.id,
-        fieldName: field.fieldName,
-        enabled: !!user && !!paddy.deviceId
-      })) || []
-    )
-  );
+  // Cloud Functions now handle device monitoring and notifications automatically
+  // No frontend monitoring needed
   
   // Handle scan selected devices
   const handleScanDevices = async () => {
@@ -271,13 +259,13 @@ export default function Home() {
     setScanResults({});
 
     try {
-      const { executeDeviceAction } = await import('@/lib/utils/deviceActions');
+      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
       const { ref, get } = await import('firebase/database');
 
       const scanPromises = devicesToScan.map(async (deviceId) => {
         try {
-          // Execute scan on device
-          await executeDeviceAction(deviceId, 'scan', 15000);
+          // Execute scan on device (NPK sensor on ESP32C)
+          await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, '');
           
           // Fetch NPK data from RTDB after successful scan
           const npkData = await getDeviceData(deviceId, 'npk');
@@ -346,16 +334,7 @@ export default function Home() {
   };
 
   const closeScanModal = async () => {
-    // Reset action to "none" for all devices when closing
-    const { resetDeviceAction } = await import('@/lib/utils/deviceActions');
-    for (const device of allDevicesList) {
-      try {
-        await resetDeviceAction(device.deviceId);
-      } catch (error) {
-        console.error(`Error resetting action for ${device.deviceId}:`, error);
-      }
-    }
-    
+    // Commands are now automatically managed by Cloud Functions
     setIsScanModalOpen(false);
     setTimeout(() => {
       setScanMode('all');

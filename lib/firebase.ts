@@ -4,6 +4,7 @@ import { getAuth, browserLocalPersistence, setPersistence } from "firebase/auth"
 import { getFirestore } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 import { getMessaging, getToken, onMessage, Messaging } from "firebase/messaging";
+import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -23,6 +24,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const database = getDatabase(app);
+const functions = getFunctions(app);
 
 // Set auth persistence to LOCAL for PWA support
 // This ensures auth state persists even when app is closed
@@ -48,6 +50,6 @@ if (typeof window !== "undefined" && 'serviceWorker' in navigator) {
   }
 }
 
-export { app, auth, db, database, analytics, messaging };
+export { app, auth, db, database, functions, analytics, messaging };
 // Alias for compatibility with code expecting 'firestore' export
 export const firestore = db;

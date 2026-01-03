@@ -6,246 +6,62 @@ admin.initializeApp({
   databaseURL: "https://rice-padbuddy-default-rtdb.asia-southeast1.firebasedatabase.app",
 });
 
-/**
- * Scheduled function: Auto-log sensor readings every 5 minutes
- * 
- * This runs independently of your Vercel app and works 24/7.
- * It checks all devices in RTDB and logs new readings to Firestore.
- */
-export const scheduledSensorLogger = functions.pubsub
-  .schedule('*/5 * * * *')  // Cron expression: every 5 minutes
-  .timeZone('Asia/Manila')  // Set timezone (adjust if needed)
-  .onRun(async (context) => {
-    console.log('[Scheduled] Starting sensor logging job...');
-    
-    const firestore = admin.firestore();
-    const database = admin.database();
-    
-    try {
-      // Prefer new hierarchy: owners/{ownerId}/fields/{fieldId}/devices/{deviceId}
-      // Fallback to legacy: devices/{deviceId}
-      const devices: Record<string, any> = {};
+// ============================================
+// EXPORT ALL CLOUD FUNCTIONS
+// ============================================
 
-      const ownersSnap = await database.ref('owners').once('value');
-      if (ownersSnap.exists()) {
-        const owners = ownersSnap.val();
-        for (const [ownerId, ownerData] of Object.entries(owners) as [string, any][]) {
-          const fields = ownerData.fields || {};
-          for (const [fieldId, fieldData] of Object.entries(fields) as [string, any][]) {
-            const fieldDevices = fieldData.devices || {};
-            for (const [deviceId, deviceData] of Object.entries(fieldDevices) as [string, any][]) {
-              devices[deviceId] = {
-                ...deviceData,
-                __meta: { ownerId, fieldId, path: 'owners' },
-              };
-            }
-          }
-        }
-      }
+// 1️⃣ Device Heartbeat & Monitoring
+// Note: heartbeatMonitor.ts has legacy functions, we keep them for compatibility
+export * from './heartbeatMonitor';
 
-      // Legacy fallback
-      if (Object.keys(devices).length === 0) {
-        const legacySnap = await database.ref('devices').once('value');
-        if (!legacySnap.exists()) {
-          console.log('[Scheduled] No devices found in RTDB (owners/ or devices/)');
-          return null;
-        }
-        Object.assign(devices, legacySnap.val());
-      }
+// 2️⃣ Live Command Verification
+export * from './liveCommands';
 
-      let totalLogged = 0;
+// 3️⃣ Scheduled Commands Executor
+export * from './scheduledExecutor';
 
-      // Process each device
-      for (const [deviceId, deviceData] of Object.entries(devices) as [string, any][]) {
-        try {
-          // Get NPK data from device
-          const npk = deviceData.npk || deviceData.sensors || deviceData.readings;
-          
-          if (!npk) {
-            // Log error: No sensor data found
-            console.warn(`[Scheduled] No sensor data for device ${deviceId}`);
-            await firestore.collection('errors').add({
-              deviceId: deviceId,
-              type: 'sensor_read_failed',
-              severity: 'warning',
-              message: `Device ${deviceId} has no sensor data in RTDB`,
-              details: {
-                availableKeys: Object.keys(deviceData),
-                checkedAt: Date.now()
-              },
-              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-              resolved: false,
-              notified: false
-            });
-            continue; // Skip devices without sensor data
-          }
+// 4️⃣ NPK / Sensor Data Logger
+export * from './sensorLogger';
 
-          // Validate data is fresh (not stale from Firestore)
-          const deviceTimestamp = npk.lastUpdate ?? npk.timestamp ?? npk.ts;
-          
-          // CRITICAL: Only log if we have a valid timestamp from device
-          if (!deviceTimestamp) {
-            console.warn(`[Scheduled] Device ${deviceId} has no timestamp, skipping stale data`);
-            continue;
-          }
-          
-          const now = Date.now();
-          const timeSinceLastUpdate = now - (typeof deviceTimestamp === 'number' ? deviceTimestamp : 0);
-          
-          // Skip data older than 1 hour (likely stale from Firestore)
-          if (timeSinceLastUpdate > 60 * 60 * 1000) {
-            console.warn(`[Scheduled] Device ${deviceId} data is ${Math.round(timeSinceLastUpdate / 60000)} minutes old, skipping stale data`);
-            continue;
-          }
+// 5️⃣ Device Registration & Onboarding
+export * from './deviceRegistration';
 
-          // Normalize readings
-          const nitrogen = npk.nitrogen ?? npk.n ?? npk.N ?? null;
-          const phosphorus = npk.phosphorus ?? npk.p ?? npk.P ?? null;
-          const potassium = npk.potassium ?? npk.k ?? npk.K ?? null;
+// 6️⃣ Field Area Calculation & NPK Recommendations
+export * from './fieldCalculations';
 
-          // Skip if no actual readings
-          if (nitrogen === null && phosphorus === null && potassium === null) {
-            console.warn(`[Scheduled] Device ${deviceId} has null/empty sensor values`);
-            await firestore.collection('errors').add({
-              deviceId: deviceId,
-              type: 'invalid_data',
-              severity: 'warning',
-              message: `Device ${deviceId} has incomplete sensor data (all null)`,
-              details: { nitrogen, phosphorus, potassium },
-              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-              resolved: false,
-              notified: false
-            });
-            continue;
-          }
+// 7️⃣ System Logger & Audit (NEW - preferred over legacy)
+export {
+  cleanupSystemLogs,
+  cleanupDeviceLogs,
+  generateHealthReport,
+  logInfo,
+  logWarning,
+  logError,
+  logCritical
+} from './systemLogger';
 
-          // Find paddies associated with this device
-          const paddiesSnapshot = await firestore
-            .collectionGroup('paddies')
-            .where('deviceId', '==', deviceId)
-            .get();
+// 8️⃣ Notification Dispatcher
+export * from './notificationDispatcher';
 
-          if (paddiesSnapshot.empty) {
-            console.log(`[Scheduled] No paddies found for device ${deviceId}`);
-            // Only log as info-level error (not critical)
-            await firestore.collection('errors').add({
-              deviceId: deviceId,
-              type: 'device_unassigned',
-              severity: 'info',
-              message: `Device ${deviceId} is not assigned to any paddy`,
-              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-              resolved: false,
-              notified: false
-            });
-            continue;
-          }
+// 8️⃣ Legacy functions (for backward compatibility)
+export * from './scheduledCommands';
+// Export commandLogger without logSystemEvent to avoid conflict
+export {
+  CommandLog,
+  logCommand,
+  updateCommandLog,
+  getDeviceCommandLogs,
+  getUserCommandLogs,
+  logDeviceError,
+  resolveDeviceError,
+  getDeviceErrors,
+  cleanupOldLogs,
+  getDeviceCommandStats
+} from './commandLogger';
 
-          // Log to each associated paddy (with deduplication check)
-          const logPayload = {
-            nitrogen,
-            phosphorus,
-            potassium,
-            deviceTimestamp: deviceTimestamp ?? null,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-            source: 'firebase-scheduled',
-          };
-
-          // Helper to normalize various timestamp shapes to milliseconds
-          const toMillis = (value: any): number => {
-            if (!value) return 0;
-            if (typeof value === 'number') return value;
-            if (value.toDate) return value.toDate().getTime();
-            if (value.getTime) return value.getTime();
-            return 0;
-          };
-
-          const writes: Promise<any>[] = [];
-          paddiesSnapshot.forEach((paddyDoc) => {
-            const logsCol = paddyDoc.ref.collection('logs');
-            
-            // Check if we already logged this reading (deduplication)
-            writes.push(
-              logsCol
-                .orderBy('timestamp', 'desc')
-                .limit(1)
-                .get()
-                .then(async (lastLogSnapshot) => {
-                  // Strong dedup: if a log already exists with the same deviceTimestamp, skip immediately
-                  const currentDeviceTime = toMillis(deviceTimestamp);
-                  if (currentDeviceTime > 0) {
-                    const existingSameTs = await logsCol
-                      .where('deviceTimestamp', '==', currentDeviceTime)
-                      .limit(1)
-                      .get();
-                    if (!existingSameTs.empty) {
-                      return null; // Already logged this exact device timestamp
-                    }
-                  }
-
-                  if (!lastLogSnapshot.empty) {
-                    const lastLog = lastLogSnapshot.docs[0].data();
-                    const lastDeviceTime = toMillis(lastLog.deviceTimestamp);
-                    const lastServerTime = toMillis(lastLog.timestamp);
-
-                    // Dedup 1: exact same deviceTimestamp (replays / stale logs)
-                    if (lastDeviceTime > 0 && currentDeviceTime > 0 && currentDeviceTime === lastDeviceTime) {
-                      return null; // Skip exact duplicate
-                    }
-
-                    // Dedup 2: same readings within 5 minutes based on device timestamp
-                    if (
-                      lastDeviceTime > 0 &&
-                      currentDeviceTime > 0 &&
-                      Math.abs(currentDeviceTime - lastDeviceTime) < 5 * 60 * 1000 &&
-                      lastLog.nitrogen === nitrogen &&
-                      lastLog.phosphorus === phosphorus &&
-                      lastLog.potassium === potassium
-                    ) {
-                      return null; // Skip near-duplicate readings
-                    }
-
-                    // Fallback dedup using server timestamp if deviceTimestamp missing
-                    if (
-                      lastServerTime > 0 &&
-                      lastLog.nitrogen === nitrogen &&
-                      lastLog.phosphorus === phosphorus &&
-                      lastLog.potassium === potassium &&
-                      (toMillis(deviceTimestamp) || Date.now()) - lastServerTime < 5 * 60 * 1000
-                    ) {
-                      return null; // Skip duplicate by server time
-                    }
-                  }
-                  
-                  // Log the reading
-                  return logsCol.add(logPayload);
-                })
-                .catch((error) => {
-                  console.error(`[Scheduled] Error checking/adding log for paddy ${paddyDoc.id}:`, error);
-                  return null;
-                })
-            );
-          });
-
-          const results = await Promise.all(writes);
-          const successful = results.filter(r => r !== null).length;
-          totalLogged += successful;
-
-          if (successful > 0) {
-            console.log(`[Scheduled] Logged ${successful} reading(s) for device ${deviceId}`);
-          }
-        } catch (error: any) {
-          console.error(`[Scheduled] Error processing device ${deviceId}:`, error);
-        }
-      }
-
-      console.log(`[Scheduled] Job completed. Logged ${totalLogged} reading(s) total.`);
-      return { success: true, logged: totalLogged };
-    } catch (error: any) {
-      console.error('[Scheduled] Fatal error:', error);
-      console.error('[Scheduled] Error stack:', error.stack);
-      throw error; // Re-throw to mark function as failed
-    }
-  });
+// ============================================
+// LEGACY FUNCTIONS (Backward Compatibility)
+// ============================================
 
 /**
  * Real-time Alert Processor: Triggered when new sensor logs are created
@@ -697,4 +513,402 @@ export const alertCleanupScheduler = functions.pubsub
 // Basic test endpoint remains
 export const helloWorld = functions.https.onRequest((request, response) => {
   response.send("Hello from PadBuddy Cloud Functions!");
+});
+
+/**
+ * HTTPS Callable Function: Send Device Command
+ * 
+ * Validates and sends commands to ESP32 devices through RTDB.
+ * This provides server-side security, validation, and logging.
+ * 
+ * Call from client:
+ * const sendCommand = httpsCallable(functions, 'sendDeviceCommand');
+ * await sendCommand({ deviceId, nodeId, role, action, params });
+ */
+export const sendDeviceCommand = functions.https.onCall(async (data, context) => {
+  // Verify authentication
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'User must be authenticated to send commands'
+    );
+  }
+
+  const { deviceId, nodeId, role, action, params = {} } = data;
+  const userId = context.auth.uid;
+
+  // Validate required fields
+  if (!deviceId || !nodeId || !role || !action) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Missing required fields: deviceId, nodeId, role, action'
+    );
+  }
+
+  // Validate nodeId
+  if (!['ESP32A', 'ESP32B', 'ESP32C'].includes(nodeId)) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Invalid nodeId. Must be ESP32A, ESP32B, or ESP32C'
+    );
+  }
+
+  // Validate role
+  if (!['relay', 'motor', 'npk'].includes(role)) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Invalid role. Must be relay, motor, or npk'
+    );
+  }
+
+  try {
+    const database = admin.database();
+    const firestore = admin.firestore();
+    const now = Date.now();
+
+    // Check if device exists and user has access
+    const deviceRef = database.ref(`devices/${deviceId}`);
+    const deviceSnap = await deviceRef.once('value');
+    
+    if (!deviceSnap.exists()) {
+      throw new functions.https.HttpsError(
+        'not-found',
+        `Device ${deviceId} not found`
+      );
+    }
+
+    const deviceData = deviceSnap.val();
+    
+    // Verify ownership or connection
+    if (deviceData.ownedBy && deviceData.ownedBy !== userId) {
+      // Check if user has access through field connection
+      const userFieldsSnap = await firestore
+        .collection('users')
+        .doc(userId)
+        .collection('fields')
+        .get();
+      
+      let hasAccess = false;
+      for (const fieldDoc of userFieldsSnap.docs) {
+        const paddiesSnap = await fieldDoc.ref.collection('paddies').get();
+        for (const paddyDoc of paddiesSnap.docs) {
+          if (paddyDoc.data().deviceId === deviceId) {
+            hasAccess = true;
+            break;
+          }
+        }
+        if (hasAccess) break;
+      }
+      
+      if (!hasAccess) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'You do not have access to this device'
+        );
+      }
+    }
+
+    // Build command data
+    const commandData: any = {
+      nodeId,
+      role,
+      action,
+      status: 'pending',
+      requestedAt: now,
+      requestedBy: userId
+    };
+
+    // Add relay number for relay commands
+    if (role === 'relay' && params.relay) {
+      commandData.relay = params.relay;
+    }
+
+    // Add other params
+    if (Object.keys(params).length > 0) {
+      commandData.params = params;
+    }
+
+    // Write command to RTDB
+    await deviceRef.update({
+      [`commands/${nodeId}`]: commandData,
+      [`audit/lastCommand`]: action,
+      [`audit/lastCommandBy`]: userId,
+      [`audit/lastCommandAt`]: now
+    });
+
+    // Log to Firestore
+    await firestore.collection('command_logs').add({
+      deviceId,
+      nodeId,
+      role,
+      action,
+      params,
+      userId,
+      status: 'sent',
+      timestamp: admin.firestore.Timestamp.fromMillis(now)
+    });
+
+    console.log(`[Command] Sent to ${deviceId}/${nodeId}: ${action} by ${userId}`);
+
+    return {
+      success: true,
+      message: `Command ${action} sent to ${deviceId}`,
+      commandPath: `devices/${deviceId}/commands/${nodeId}`,
+      timestamp: now
+    };
+
+  } catch (error: any) {
+    console.error('[Command] Error:', error);
+    
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    
+    throw new functions.https.HttpsError(
+      'internal',
+      `Failed to send command: ${error.message}`
+    );
+  }
+});
+
+/**
+ * RTDB Trigger: Monitor Command Completion
+ * 
+ * Listens for ESP32 to update command status to "completed"
+ * Logs completion to Firestore for analytics
+ */
+export const onCommandComplete = functions.database
+  .ref('/devices/{deviceId}/commands/{nodeId}')
+  .onUpdate(async (change, context) => {
+    const { deviceId, nodeId } = context.params;
+    const before = change.before.val();
+    const after = change.after.val();
+
+    // Check if status changed to completed
+    if (before.status !== 'completed' && after.status === 'completed') {
+      const firestore = admin.firestore();
+      
+      try {
+        await firestore.collection('command_logs').add({
+          deviceId,
+          nodeId,
+          role: after.role,
+          action: after.action,
+          status: 'completed',
+          requestedAt: admin.firestore.Timestamp.fromMillis(after.requestedAt),
+          executedAt: admin.firestore.Timestamp.fromMillis(after.executedAt),
+          duration: after.executedAt - after.requestedAt,
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        console.log(`[Command] Completed: ${deviceId}/${nodeId} - ${after.action}`);
+      } catch (error) {
+        console.error('[Command] Error logging completion:', error);
+      }
+    }
+
+    return null;
+  });
+
+/**
+ * HTTP Function: Clean up all user data from Firestore
+ * 
+ * Requires admin authentication to call
+ * Deletes all users, fields, paddies, logs, notifications, and FCM tokens
+ */
+export const cleanupAllUserData = functions.https.onCall(async (data, context) => {
+  // Verify user is authenticated
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'Must be logged in to cleanup data'
+    );
+  }
+
+  // Verify user is admin
+  const adminEmail = 'ricepaddy.contact@gmail.com';
+  const idTokenResult = await admin.auth().getUser(context.auth.uid);
+  const userEmail = idTokenResult.email;
+
+  if (userEmail !== adminEmail) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      `Only ${adminEmail} can cleanup data`
+    );
+  }
+
+  const firestore = admin.firestore();
+  const stats = {
+    users: 0,
+    fields: 0,
+    paddies: 0,
+    logs: 0,
+    tasks: 0,
+    notifications: 0,
+    fcmTokens: 0,
+    totalDeleted: 0,
+  };
+
+  try {
+    console.log('[Cleanup] Starting data cleanup...');
+
+    // Get all users
+    const usersRef = firestore.collection('users');
+    const usersSnapshot = await usersRef.get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const userId = userDoc.id;
+      const batch = firestore.batch();
+      let batchSize = 0;
+
+      // Delete all fields and nested documents
+      const fieldsRef = firestore.collection('users').doc(userId).collection('fields');
+      const fieldsSnapshot = await fieldsRef.get();
+
+      for (const fieldDoc of fieldsSnapshot.docs) {
+        const fieldId = fieldDoc.id;
+
+        // Delete paddies and their logs
+        const paddiesRef = firestore
+          .collection('users')
+          .doc(userId)
+          .collection('fields')
+          .doc(fieldId)
+          .collection('paddies');
+        const paddiesSnapshot = await paddiesRef.get();
+
+        for (const paddyDoc of paddiesSnapshot.docs) {
+          const paddyId = paddyDoc.id;
+
+          // Delete logs under this paddy
+          const logsRef = firestore
+            .collection('users')
+            .doc(userId)
+            .collection('fields')
+            .doc(fieldId)
+            .collection('paddies')
+            .doc(paddyId)
+            .collection('logs');
+          const logsSnapshot = await logsRef.get();
+
+          for (const logDoc of logsSnapshot.docs) {
+            batch.delete(logDoc.ref);
+            batchSize++;
+            stats.logs++;
+
+            if (batchSize >= 500) {
+              await batch.commit();
+              batchSize = 0;
+            }
+          }
+
+          // Delete the paddy itself
+          batch.delete(paddyDoc.ref);
+          batchSize++;
+          stats.paddies++;
+
+          if (batchSize >= 500) {
+            await batch.commit();
+            batchSize = 0;
+          }
+        }
+
+        // Delete tasks under this field
+        const tasksRef = firestore
+          .collection('users')
+          .doc(userId)
+          .collection('fields')
+          .doc(fieldId)
+          .collection('tasks');
+        const tasksSnapshot = await tasksRef.get();
+
+        for (const taskDoc of tasksSnapshot.docs) {
+          batch.delete(taskDoc.ref);
+          batchSize++;
+          stats.tasks++;
+
+          if (batchSize >= 500) {
+            await batch.commit();
+            batchSize = 0;
+          }
+        }
+
+        // Delete the field itself
+        batch.delete(fieldDoc.ref);
+        batchSize++;
+        stats.fields++;
+
+        if (batchSize >= 500) {
+          await batch.commit();
+          batchSize = 0;
+        }
+      }
+
+      // Delete notifications
+      const notificationsRef = firestore
+        .collection('users')
+        .doc(userId)
+        .collection('notifications');
+      const notificationsSnapshot = await notificationsRef.get();
+
+      for (const notifDoc of notificationsSnapshot.docs) {
+        batch.delete(notifDoc.ref);
+        batchSize++;
+        stats.notifications++;
+
+        if (batchSize >= 500) {
+          await batch.commit();
+          batchSize = 0;
+        }
+      }
+
+      // Delete FCM tokens
+      const fcmTokensRef = firestore
+        .collection('users')
+        .doc(userId)
+        .collection('fcmTokens');
+      const fcmTokensSnapshot = await fcmTokensRef.get();
+
+      for (const tokenDoc of fcmTokensSnapshot.docs) {
+        batch.delete(tokenDoc.ref);
+        batchSize++;
+        stats.fcmTokens++;
+
+        if (batchSize >= 500) {
+          await batch.commit();
+          batchSize = 0;
+        }
+      }
+
+      // Delete the user document itself
+      batch.delete(userDoc.ref);
+      batchSize++;
+      stats.users++;
+
+      // Final commit for this user
+      if (batchSize > 0) {
+        await batch.commit();
+      }
+    }
+
+    stats.totalDeleted =
+      stats.users +
+      stats.fields +
+      stats.paddies +
+      stats.logs +
+      stats.tasks +
+      stats.notifications +
+      stats.fcmTokens;
+
+    console.log('[Cleanup] Successfully cleaned up data:', stats);
+
+    return {
+      success: true,
+      message: `Cleanup complete! Deleted ${stats.totalDeleted} documents.`,
+      stats,
+    };
+  } catch (error) {
+    console.error('[Cleanup] Error:', error);
+    throw new functions.https.HttpsError('internal', `Cleanup failed: ${error}`);
+  }
 });

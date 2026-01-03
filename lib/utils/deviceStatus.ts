@@ -39,6 +39,7 @@ export interface DeviceData {
   status?: string;
   npk?: DeviceNPK;
   gps?: DeviceGPS;
+  heartbeat?: number | { timestamp?: number };
 }
 
 export interface DeviceHeartbeat {
@@ -116,22 +117,41 @@ export async function checkDeviceHeartbeat(deviceId: string): Promise<DeviceHear
     let isAlive = false;
     let lastSeen: string | null = null;
     let minutesAgo: number | null = null;
+    const now = Date.now();
     
-    // Strategy 1: Check device-level status field
-    if (deviceData.status === 'connected') {
+    // Strategy 1: Check device-level heartbeat timestamp (primary for relay testing)
+    if (deviceData.heartbeat) {
+      const heartbeatTs = typeof deviceData.heartbeat === 'object' 
+        ? deviceData.heartbeat.timestamp 
+        : deviceData.heartbeat;
+      
+      if (heartbeatTs) {
+        const heartbeatMs = heartbeatTs < 1e11 ? heartbeatTs * 1000 : heartbeatTs;
+        const age = now - heartbeatMs;
+        minutesAgo = Math.floor(age / 60000);
+        lastSeen = new Date(heartbeatMs).toISOString();
+        
+        // Device is alive if heartbeat is within last 10 minutes
+        if (age < 10 * 60 * 1000) {
+          isAlive = true;
+        }
+      }
+    }
+    
+    // Strategy 2: Check device-level status field
+    if (!isAlive && deviceData.status === 'connected') {
       isAlive = true;
     }
     
-    // Strategy 2: Check connectedAt timestamp (if exists)
-    if (deviceData.connectedAt) {
+    // Strategy 3: Check connectedAt timestamp (if exists)
+    if (!isAlive && deviceData.connectedAt) {
       try {
         const connectedAt = new Date(deviceData.connectedAt).getTime();
-        const now = Date.now();
         minutesAgo = Math.floor((now - connectedAt) / 60000);
         lastSeen = deviceData.connectedAt;
         
         // If status isn't set, check if connected within last 10 minutes
-        if (!isAlive && minutesAgo < 10) {
+        if (minutesAgo < 10) {
           isAlive = true;
         }
       } catch (e) {
@@ -139,19 +159,18 @@ export async function checkDeviceHeartbeat(deviceId: string): Promise<DeviceHear
       }
     }
     
-    // Strategy 3: If NPK data exists with small timestamp (relative counter from ESP32), device is online
+    // Strategy 4: If NPK data exists with small timestamp (relative counter from ESP32), device is online
     if (!isAlive && deviceData.npk && deviceData.npk.timestamp !== undefined && deviceData.npk.timestamp < 10000) {
       isAlive = true;
       lastSeen = lastSeen || 'Just now';
-      minutesAgo = 0;
+      minutesAgo = minutesAgo || 0;
     }
     
-    // Strategy 4: Check NPK timestamp if it's a proper Unix timestamp
+    // Strategy 5: Check NPK timestamp if it's a proper Unix timestamp
     if (!isAlive && deviceData.npk && deviceData.npk.timestamp && deviceData.npk.timestamp > 1e9) {
       const timestamp = deviceData.npk.timestamp < 1e11 
         ? deviceData.npk.timestamp * 1000 
         : deviceData.npk.timestamp;
-      const now = Date.now();
       const age = now - timestamp;
       const minutes = Math.floor(age / 60000);
       
@@ -259,12 +278,14 @@ export async function getDeviceStatus(deviceId: string): Promise<DeviceStatusRes
     };
   }
   
+  // Device is online with active heartbeat but no NPK readings
+  // This is acceptable for relay-testing mode
   if (heartbeat.isAlive && !hasReadings) {
     return {
       status: 'sensor-issue',
-      message: 'Device connected but sensor readings unavailable. Check sensor connections.',
+      message: 'Device connected but sensor readings unavailable. Ready for relay testing.',
       color: 'yellow',
-      badge: 'Sensor Issue',
+      badge: 'Heartbeat Only',
       lastUpdate,
       heartbeat,
       readings,
@@ -276,6 +297,53 @@ export async function getDeviceStatus(deviceId: string): Promise<DeviceStatusRes
     message: 'All systems operational',
     color: 'green',
     badge: 'Connected',
+    lastUpdate,
+    heartbeat,
+    readings,
+  };
+}
+
+/**
+ * Get device status for heartbeat-only devices (useful for relay testing)
+ * Shows "Online - No Sensor Data" when device has heartbeat but no NPK
+ */
+export async function getDeviceHeartbeatStatus(deviceId: string): Promise<DeviceStatusResult> {
+  const deviceData = await getDeviceData(deviceId);
+  const heartbeat = await checkDeviceHeartbeat(deviceId);
+  const readings: SensorReadings = {};
+  
+  // Format last update time
+  let lastUpdate = 'No connection';
+  if (heartbeat.lastSeen) {
+    if (heartbeat.minutesAgo === 0) {
+      lastUpdate = 'Just now';
+    } else if (heartbeat.minutesAgo! < 60) {
+      lastUpdate = `${heartbeat.minutesAgo}m ago`;
+    } else if (heartbeat.minutesAgo! < 1440) {
+      lastUpdate = `${Math.floor(heartbeat.minutesAgo! / 60)}h ago`;
+    } else {
+      lastUpdate = `${Math.floor(heartbeat.minutesAgo! / 1440)}d ago`;
+    }
+  }
+  
+  if (!heartbeat.isAlive) {
+    return {
+      status: 'offline',
+      message: 'Device is offline. No heartbeat detected.',
+      color: 'red',
+      badge: 'Offline',
+      lastUpdate,
+      heartbeat,
+      readings,
+    };
+  }
+  
+  // Device has active heartbeat (online but no sensor data)
+  return {
+    status: 'ok',
+    message: 'Device online - No sensor data (relay testing mode)',
+    color: 'green',
+    badge: 'Online',
     lastUpdate,
     heartbeat,
     readings,

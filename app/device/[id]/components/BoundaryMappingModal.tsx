@@ -134,7 +134,7 @@ export function BoundaryMappingModal({
           width="100%"
           height="100%"
           frameBorder="0"
-          style={{ border: 0, position: 'absolute', inset: 0 }}
+          className="ui-embed-fill"
           src={`https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&output=embed&z=18`}
           allowFullScreen
           title="Map View"

@@ -5,6 +5,42 @@
   --foreground: #171717;
 }
 
+:root {
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --surface-strong: #0f172a;
+  --border-strong: #e5e7eb;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0b1120;
+  --foreground: #e2e8f0;
+  --surface: #0f172a;
+  --surface-muted: #111827;
+  --surface-strong: #020617;
+  --border-strong: #1f2937;
+  --text-primary: #e2e8f0;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+
+  /* Neutral palette overrides for dark mode readiness */
+  --color-gray-50: #0f172a;
+  --color-gray-100: #111827;
+  --color-gray-200: #1f2937;
+  --color-gray-300: #273449;
+  --color-gray-400: #334155;
+  --color-gray-500: #475569;
+  --color-gray-600: #64748b;
+  --color-gray-700: #94a3b8;
+  --color-gray-800: #cbd5e1;
+  --color-gray-900: #e2e8f0;
+  color-scheme: dark;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -137,6 +173,33 @@ textarea,
   -moz-user-select: text;
   -ms-user-select: text;
   user-select: text;
+}
+
+/* Reusable layout helpers (avoid inline styles) */
+.ui-chart {
+  height: 320px;
+}
+
+.ui-map-container {
+  height: 300px;
+}
+
+.ui-embed-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.ui-iframe-reset {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.ui-heading-mono {
+  font-family: 'Courier New', Courier, monospace;
 }
 
 /* Modal Popup Animation */

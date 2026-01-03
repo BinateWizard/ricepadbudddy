@@ -37,6 +37,9 @@ import { StatisticsTab } from './components/StatisticsTab';
 import ControlPanelTab from './components/ControlPanelTab';
 import { InformationTab } from './components/InformationTab';
 
+// Pre-import utility modules to avoid dynamic import timing issues
+import { getDeviceData as getDeviceStatus, getDeviceGPS } from '@/lib/utils/deviceStatus';
+
 /**
  * Log sensor readings to Firestore for historical tracking
  * 
@@ -169,12 +172,11 @@ export default function FieldDetail() {
     setScanResults({});
 
     try {
-      const { executeDeviceAction } = await import('@/lib/utils/deviceActions');
-      
+      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
       const scanPromises = devicesToScan.map(async (deviceId) => {
         try {
-          // Execute scan on device
-          await executeDeviceAction(deviceId, 'scan', 15000);
+          // Execute scan on device (NPK sensor on ESP32C)
+          await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, '');
           
           // Fetch NPK data from RTDB after successful scan
           const npkData = await getDeviceData(deviceId, 'npk');
@@ -244,16 +246,7 @@ export default function FieldDetail() {
   };
 
   const closeScanModal = async () => {
-    // Reset action to "none" for all paddies when closing
-    const { resetDeviceAction } = await import('@/lib/utils/deviceActions');
-    for (const paddy of paddies) {
-      try {
-        await resetDeviceAction(paddy.deviceId);
-      } catch (error) {
-        console.error(`Error resetting action for ${paddy.deviceId}:`, error);
-      }
-    }
-    
+    // Commands are now automatically managed by Cloud Functions
     setIsScanModalOpen(false);
     setTimeout(() => {
       setScanMode('all');
@@ -321,18 +314,13 @@ export default function FieldDetail() {
     if (!user || paddies.length === 0) return;
 
     try {
-      const { database } = await import('@/lib/firebase');
-      const { ref, get } = await import('firebase/database');
-      const { getDeviceData } = await import('@/lib/utils/deviceStatus');
-      const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
-
       const readings: any[] = [];
       
       for (const paddy of paddies) {
         if (!paddy.deviceId) continue;
         
         try {
-          const deviceData = await getDeviceData(paddy.deviceId);
+          const deviceData = await getDeviceStatus(paddy.deviceId);
           console.log(`[Device Fetch] ${paddy.deviceId}:`, deviceData);
           
           if (deviceData) {
@@ -341,14 +329,6 @@ export default function FieldDetail() {
               paddyId: paddy.id,
               ...deviceData,
             });
-
-            // Auto-log NPK readings if available
-            if (deviceData.npk && (deviceData.npk.n !== undefined || deviceData.npk.p !== undefined || deviceData.npk.k !== undefined)) {
-              console.log(`[Auto-Log] Logging NPK for ${paddy.deviceId}:`, deviceData.npk);
-              await autoLogReadings(user.uid, fieldId, paddy.id, deviceData.npk);
-            } else {
-              console.log(`[Auto-Log] No NPK data for ${paddy.deviceId}`);
-            }
           } else {
             console.log(`[Device Fetch] No data found for ${paddy.deviceId}`);
           }
@@ -445,8 +425,6 @@ export default function FieldDetail() {
     
     try {
       // Fetch GPS coordinates from Firebase RTDB
-      const { getDeviceGPS } = await import('@/lib/utils/deviceStatus');
-      
       const gps = await getDeviceGPS(paddy.deviceId);
       
       if (gps && gps.lat && gps.lng) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scan, Map, MapPin, Power, RotateCw } from 'lucide-react';
+import { Scan, Map, MapPin, Power, Loader2 } from 'lucide-react';
 
 interface ControlPanelProps {
   isScanning: boolean;
@@ -8,12 +8,14 @@ interface ControlPanelProps {
   hasSavedBoundary: boolean;
   gpsData: any;
   relayStates: boolean[];
-  isRestartingDevice: boolean;
+  relayProcessing?: boolean[];
+  motorExtended: boolean;
+  motorProcessing: boolean;
   onScanNow: () => Promise<void>;
   onOpenBoundaryMap: () => void;
   onViewLocation: () => void;
   onRelayToggle: (index: number) => Promise<void>;
-  onRestartDevice: () => Promise<void>;
+  onMotorToggle: () => Promise<void>;
 }
 
 export function ControlPanel({
@@ -23,16 +25,18 @@ export function ControlPanel({
   hasSavedBoundary,
   gpsData,
   relayStates,
-  isRestartingDevice,
+  relayProcessing = [false, false, false, false],
+  motorExtended,
+  motorProcessing,
   onScanNow,
   onOpenBoundaryMap,
   onViewLocation,
   onRelayToggle,
-  onRestartDevice
+  onMotorToggle
 }: ControlPanelProps) {
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4" style={{ fontFamily: "'Courier New', Courier, monospace" }}>Device Controls</h3>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4 ui-heading-mono">Device Controls</h3>
       
       {/* Success Banner */}
       {scanSuccess && (
@@ -124,14 +128,29 @@ export function ControlPanel({
           </div>
           <button
             onClick={() => onRelayToggle(0)}
-            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium ${
-              relayStates[0]
+            disabled={relayProcessing[0]}
+            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+              relayProcessing[0]
+                ? 'bg-gray-400 cursor-not-allowed text-white'
+                : relayStates[0]
                 ? 'bg-orange-600 hover:bg-orange-700 text-white'
                 : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
             }`}
           >
-            {relayStates[0] ? 'Turn OFF' : 'Turn ON'}
+            {relayProcessing[0] ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Waiting...
+              </>
+            ) : (
+              relayStates[0] ? 'Turn OFF' : 'Turn ON'
+            )}
           </button>
+          {relayProcessing[0] && (
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              Waiting for device response...
+            </p>
+          )}
         </div>
         
         {/* Relay 2 */}
@@ -142,28 +161,125 @@ export function ControlPanel({
           </div>
           <button
             onClick={() => onRelayToggle(1)}
-            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium ${
-              relayStates[1]
+            disabled={relayProcessing[1]}
+            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+              relayProcessing[1]
+                ? 'bg-gray-400 cursor-not-allowed text-white'
+                : relayStates[1]
                 ? 'bg-orange-600 hover:bg-orange-700 text-white'
                 : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
             }`}
           >
-            {relayStates[1] ? 'Turn OFF' : 'Turn ON'}
+            {relayProcessing[1] ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Waiting...
+              </>
+            ) : (
+              relayStates[1] ? 'Turn OFF' : 'Turn ON'
+            )}
           </button>
+          {relayProcessing[1] && (
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              Waiting for device response...
+            </p>
+          )}
         </div>
         
-        {/* Device Restart */}
-        <div className="p-4 border border-gray-200 rounded-lg hover:border-red-500 transition-colors">
+        {/* Relay 3 */}
+        <div className="p-4 border border-gray-200 rounded-lg hover:border-orange-500 transition-colors">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-semibold text-gray-900">Restart Device</h4>
-            <RotateCw className="w-5 h-5 text-red-600" />
+            <h4 className="font-semibold text-gray-900">Relay 3</h4>
+            <Power className={`w-5 h-5 ${relayStates[2] ? 'text-orange-600' : 'text-gray-400'}`} />
           </div>
           <button
-            onClick={onRestartDevice}
-            disabled={isRestartingDevice}
-            className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+            onClick={() => onRelayToggle(2)}
+            disabled={relayProcessing[2]}
+            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+              relayProcessing[2]
+                ? 'bg-gray-400 cursor-not-allowed text-white'
+                : relayStates[2]
+                ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
+            }`}
           >
-            {isRestartingDevice ? 'Restarting...' : 'Restart'}
+            {relayProcessing[2] ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Waiting...
+              </>
+            ) : (
+              relayStates[2] ? 'Turn OFF' : 'Turn ON'
+            )}
+          </button>
+          {relayProcessing[2] && (
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              Waiting for device response...
+            </p>
+          )}
+        </div>
+        
+        {/* Relay 4 */}
+        <div className="p-4 border border-gray-200 rounded-lg hover:border-orange-500 transition-colors">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-gray-900">Relay 4</h4>
+            <Power className={`w-5 h-5 ${relayStates[3] ? 'text-orange-600' : 'text-gray-400'}`} />
+          </div>
+          <button
+            onClick={() => onRelayToggle(3)}
+            disabled={relayProcessing[3]}
+            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+              relayProcessing[3]
+                ? 'bg-gray-400 cursor-not-allowed text-white'
+                : relayStates[3]
+                ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
+            }`}
+          >
+            {relayProcessing[3] ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Waiting...
+              </>
+            ) : (
+              relayStates[3] ? 'Turn OFF' : 'Turn ON'
+            )}
+          </button>
+          {relayProcessing[3] && (
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              Waiting for device response...
+            </p>
+          )}
+        </div>
+        
+        {/* Motor Control (ESP32B) */}
+        <div className="p-4 border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h4 className="font-semibold text-gray-900">Motor Controller</h4>
+              <p className="text-xs text-gray-600 mt-1">ESP32B - Extend/Retract</p>
+            </div>
+            <span className="text-lg">{motorExtended ? '⬆️' : '⬇️'}</span>
+          </div>
+          <button
+            onClick={onMotorToggle}
+            disabled={motorProcessing}
+            className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+              motorProcessing
+                ? 'bg-gray-400 cursor-not-allowed text-white'
+                : motorExtended
+                ? 'bg-red-600 hover:bg-red-700 text-white'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {motorProcessing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              motorExtended ? 'Retract Motor' : 'Extend Motor'
+            )}
           </button>
         </div>
       </div>

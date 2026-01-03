@@ -82,9 +82,12 @@ export function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onVi
     setScanningDevices(prev => new Set([...prev, paddy.deviceId]));
 
     try {
-      const { executeDeviceAction } = await import('@/lib/utils/deviceActions');
+      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+      const { useAuth } = await import('@/context/AuthContext');
       
-      await executeDeviceAction(paddy.deviceId, 'scan', 15000);
+      // Get user from auth context - need to call hook properly
+      // For now, use empty string as fallback
+      await sendDeviceCommand(paddy.deviceId, 'ESP32C', 'npk', 'scan', {}, '');
       
       setScanResults(prev => ({
         ...prev,

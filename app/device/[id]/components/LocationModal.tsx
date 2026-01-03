@@ -64,12 +64,12 @@ export function LocationModal({
               <div className="space-y-6">
                 {/* Map */}
                 {gpsData.lat && gpsData.lng && (
-                  <div className="bg-gray-100 rounded-xl overflow-hidden" style={{ height: '300px' }}>
+                  <div className="bg-gray-100 rounded-xl overflow-hidden ui-map-container">
                     <iframe
                       width="100%"
                       height="100%"
                       frameBorder="0"
-                      style={{ border: 0 }}
+                      className="ui-iframe-reset"
                       src={`https://www.google.com/maps?q=${gpsData.lat},${gpsData.lng}&output=embed&zoom=15`}
                       allowFullScreen
                     />

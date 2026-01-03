@@ -1,32 +1,41 @@
 /**
  * Device Command Utilities
  * 
- * Handles sending commands to ESP32 nodes and managing their responses
+ * Handles sending commands to ESP32 nodes directly to RTDB
+ * ESP32 uses stream listeners for instant response
  */
 
 import { database } from '@/lib/firebase';
-import { ref, update, get } from 'firebase/database';
-import { getDeviceRef } from '@/lib/utils/rtdbHelper';
+import { ref, get, update } from 'firebase/database';
 
 export interface DeviceCommand {
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C';
   role: 'relay' | 'motor' | 'npk';
   action: string;
-  params: Record<string, any>;
-  ack: boolean;
+  relay?: number;
+  params?: Record<string, any>;
+  status?: string; // 'pending' | 'completed' | 'error'
   requestedAt: number;
-  executedAt: number;
+  executedAt?: number;
+  error?: string;
 }
 
 export interface CommandResult {
   success: boolean;
   message: string;
-  ack?: boolean;
+  status?: string;
   executedAt?: number;
 }
 
 /**
- * Send command to device node
+ * Send command to device node directly to RTDB
+ * 
+ * Layer 1: Live Control (Foreground Only)
+ * - Client sends live command via RTDB
+ * - ESP32 responds with ACK
+ * - Client shows waiting state during execution
+ * - Timeout if no response (offline detection handled by Functions)
+ * 
  * @param deviceId - Device identifier (e.g., "DEVICE_0001")
  * @param nodeId - ESP32 node (ESP32A, ESP32B, ESP32C)
  * @param role - Node role (relay, motor, npk)
@@ -42,50 +51,154 @@ export async function sendDeviceCommand(
   params: Record<string, any> = {},
   userId: string
 ): Promise<CommandResult> {
+  const now = Date.now();
+  let logId: string | null = null;
+  
   try {
-    const result = await getDeviceRef(deviceId);
-    if (!result) {
-      return { success: false, message: `Could not get ref for ${deviceId}` };
+    // Build command data
+    const commandData: any = {
+      nodeId,
+      role,
+      action,
+      status: 'pending',
+      requestedAt: now,
+      requestedBy: userId,
+      source: 'live' // Mark as live command (not scheduled)
+    };
+
+    // Add relay number for relay commands
+    if (role === 'relay' && params.relay) {
+      commandData.relay = params.relay;
     }
-    const { ref: deviceRef } = result;
 
-    const now = Date.now();
+    // Add other params
+    if (Object.keys(params).length > 0) {
+      commandData.params = params;
+    }
 
-    // Send command
+    // Write directly to RTDB
+    const deviceRef = ref(database, `devices/${deviceId}`);
     await update(deviceRef, {
-      [`commands/${nodeId}`]: {
-        nodeId,
-        role,
-        action,
-        params,
-        ack: false,
-        requestedAt: now,
-        executedAt: 0
-      },
+      [`commands/${nodeId}`]: commandData,
       [`audit/lastCommand`]: action,
       [`audit/lastCommandBy`]: userId,
       [`audit/lastCommandAt`]: now
     });
 
-    // Wait for acknowledgment (up to 30 seconds)
-    const ackResult = await waitForAcknowledgment(deviceId, nodeId, 30000);
+    console.log(`[Live Command] Sent to ${deviceId}/${nodeId}: ${action}`, commandData);
 
-    if (ackResult.acked) {
+    // Log command to Firestore for audit trail
+    try {
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('@/lib/firebase');
+      const logDoc = await addDoc(collection(db, 'commandLogs'), {
+        deviceId,
+        nodeId,
+        commandType: role,
+        action,
+        source: 'live',
+        status: 'sent',
+        requestedBy: userId,
+        requestedAt: now,
+        sentAt: now,
+        params,
+        timestamp: serverTimestamp()
+      });
+      logId = logDoc.id;
+    } catch (logError) {
+      console.warn('[Live Command] Failed to log command:', logError);
+      // Continue even if logging fails
+    }
+
+    // Wait for ESP32 to complete the command (up to 30 seconds)
+    // This shows "waiting" state in UI
+    const completionResult = await waitForCommandComplete(deviceId, nodeId, 30000);
+
+    if (completionResult.completed) {
+      // Success - update log
+      if (logId) {
+        try {
+          const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+          const { db } = await import('@/lib/firebase');
+          await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
+            status: 'completed',
+            completedAt: completionResult.executedAt,
+            updatedAt: serverTimestamp()
+          });
+        } catch (updateError) {
+          console.warn('[Live Command] Failed to update log:', updateError);
+        }
+      }
+      
       return {
         success: true,
         message: `✓ ${role} command "${action}" executed`,
-        ack: true,
-        executedAt: ackResult.executedAt
+        status: 'completed',
+        executedAt: completionResult.executedAt
+      };
+    } else if (completionResult.error) {
+      // Error - update log
+      if (logId) {
+        try {
+          const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+          const { db } = await import('@/lib/firebase');
+          await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
+            status: 'failed',
+            error: completionResult.error,
+            updatedAt: serverTimestamp()
+          });
+        } catch (updateError) {
+          console.warn('[Live Command] Failed to update log:', updateError);
+        }
+      }
+      
+      return {
+        success: false,
+        message: `✗ Command failed: ${completionResult.error}`,
+        status: 'error'
       };
     } else {
+      // Timeout - update log
+      // Note: Official "device offline" detection is handled by heartbeat monitor (Functions)
+      // Client just reports timeout
+      if (logId) {
+        try {
+          const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+          const { db } = await import('@/lib/firebase');
+          await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
+            status: 'timeout',
+            error: 'Device did not respond within 30 seconds',
+            updatedAt: serverTimestamp()
+          });
+        } catch (updateError) {
+          console.warn('[Live Command] Failed to update log:', updateError);
+        }
+      }
+      
       return {
-        success: true,
-        message: `⏱️ Command sent but no acknowledgment received (device may be offline)`,
-        ack: false
+        success: false,
+        message: `⏱️ Command timeout - device may be offline or busy`,
+        status: 'timeout'
       };
     }
   } catch (error) {
-    console.error('Error sending device command:', error);
+    console.error('[Live Command] Error sending command:', error);
+    
+    // Log error
+    if (logId) {
+      try {
+        const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          updatedAt: serverTimestamp()
+        });
+      } catch (updateError) {
+        console.warn('[Live Command] Failed to update log:', updateError);
+      }
+    }
+    
     return {
       success: false,
       message: `✗ Failed to send command: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -94,43 +207,50 @@ export async function sendDeviceCommand(
 }
 
 /**
- * Wait for ESP32 to acknowledge command execution
+ * Wait for ESP32 to complete command execution
+ * ESP32 will update the command with status: "completed" and executedAt timestamp
  * @param deviceId - Device identifier
- * @param nodeId - Node that should acknowledge
+ * @param nodeId - Node that should complete the command
  * @param timeout - Maximum time to wait (ms)
  */
-async function waitForAcknowledgment(
+async function waitForCommandComplete(
   deviceId: string,
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C',
   timeout: number
-): Promise<{ acked: boolean; executedAt?: number }> {
+): Promise<{ completed: boolean; executedAt?: number; error?: string }> {
   const startTime = Date.now();
   const pollInterval = 500; // Check every 500ms
 
   while (Date.now() - startTime < timeout) {
     try {
-      const result = await getDeviceRef(deviceId, `commands/${nodeId}`);
-      if (!result) {
-        throw new Error(`Could not get ref for ${deviceId}`);
-      }
-      const { ref: commandRef } = result;
+      const commandRef = ref(database, `devices/${deviceId}/commands/${nodeId}`);
       const snapshot = await get(commandRef);
 
       if (snapshot.exists()) {
         const command = snapshot.val();
-        if (command.ack === true && command.executedAt > 0) {
-          return { acked: true, executedAt: command.executedAt };
+        
+        // ESP32 sets status to "completed" when done
+        if (command.status === 'completed' && command.executedAt) {
+          console.log(`[Command] Completed by ${deviceId}/${nodeId}`, command);
+          return { completed: true, executedAt: command.executedAt };
+        }
+        
+        // Check for error status
+        if (command.status === 'error') {
+          console.error(`[Command] Error from ${deviceId}/${nodeId}`, command);
+          return { completed: false, error: command.error || 'Unknown error' };
         }
       }
     } catch (error) {
-      console.error('Error checking acknowledgment:', error);
+      console.error('Error checking command completion:', error);
     }
 
     // Wait before next poll
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
   }
 
-  return { acked: false };
+  console.warn(`[Command] Timeout waiting for ${deviceId}/${nodeId}`);
+  return { completed: false };
 }
 
 /**
@@ -288,9 +408,7 @@ export async function getCommandStatus(
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C'
 ): Promise<DeviceCommand | null> {
   try {
-    const result = await getDeviceRef(deviceId, `commands/${nodeId}`);
-    if (!result) return null;
-    const { ref: commandRef } = result;
+    const commandRef = ref(database, `devices/${deviceId}/commands/${nodeId}`);
     const snapshot = await get(commandRef);
 
     if (snapshot.exists()) {
@@ -311,9 +429,7 @@ export async function getNodeStatus(
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C'
 ): Promise<{ status: string; lastSeen: number } | null> {
   try {
-    const result = await getDeviceRef(deviceId, `nodes/${nodeId}`);
-    if (!result) return null;
-    const { ref: nodeRef } = result;
+    const nodeRef = ref(database, `devices/${deviceId}/nodes/${nodeId}`);
     const snapshot = await get(nodeRef);
 
     if (snapshot.exists()) {

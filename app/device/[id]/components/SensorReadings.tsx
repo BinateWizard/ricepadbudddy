@@ -21,7 +21,7 @@ interface SensorReadingsProps {
 export function SensorReadings({ paddyLiveData, weatherData }: SensorReadingsProps) {
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4" style={{ fontFamily: "'Courier New', Courier, monospace" }}>Current Readings</h3>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4 ui-heading-mono">Current Readings</h3>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="p-4 bg-blue-50 rounded-lg">
           <div className="flex items-center justify-between mb-2">

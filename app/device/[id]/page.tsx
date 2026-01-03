@@ -23,7 +23,6 @@ import { db, database } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, updateDoc, query, where, onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { ref, get, onValue, set } from 'firebase/database';
 import { getDeviceData, onDeviceValue } from '@/lib/utils/rtdbHelper';
-import { sendDeviceAction, executeDeviceAction } from '@/lib/utils/deviceActions';
 import NotificationBell from "@/components/NotificationBell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +31,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Menu, Home as HomeIcon, BookOpen, HelpCircle, Info, LogOut, Shield } from "lucide-react";
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
 import { usePaddyLiveData } from "@/lib/hooks/usePaddyLiveData";
-import { useDeviceMonitoring } from "@/lib/hooks/useDeviceMonitoring";
 
 // Admin email for access control
 const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
@@ -79,12 +77,62 @@ export default function DeviceDetail() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [pointAddedNotification, setPointAddedNotification] = useState(false);
   const [hasSavedBoundary, setHasSavedBoundary] = useState(false);
-  const [relayStates, setRelayStates] = useState<boolean[]>([false, false]);
-  const [isRestartingDevice, setIsRestartingDevice] = useState(false);
+  const [relayStates, setRelayStates] = useState<boolean[]>([false, false, false, false]);
+  const [relayProcessing, setRelayProcessing] = useState<boolean[]>([false, false, false, false]);
+  const [motorExtended, setMotorExtended] = useState(false);
+  const [motorProcessing, setMotorProcessing] = useState(false);
   const [mapMode, setMapMode] = useState<'view' | 'edit'>('view');
+  const [deviceOnlineStatus, setDeviceOnlineStatus] = useState<{online: boolean; lastChecked: number} | null>(null);
 
   // Live NPK data from Firestore logs (populated by Cloud Functions)
   const paddyLiveData = usePaddyLiveData(user?.uid ?? null, fieldInfo?.id ?? null, paddyInfo?.id ?? null);
+
+  // Listen to RTDB status (set by Cloud Function based on heartbeat)
+  useEffect(() => {
+    if (!deviceId) return;
+
+    const statusRef = ref(database, `devices/${deviceId}/status`);
+    const unsubscribe = onValue(statusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const status = snapshot.val();
+        setDeviceOnlineStatus({
+          online: status.online === true,
+          lastChecked: status.lastChecked || Date.now()
+        });
+      } else {
+        setDeviceOnlineStatus(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [deviceId]);
+
+  // Listen to relay states from RTDB (stored by Cloud Function)
+  // Listens to individual relays so it updates even if not all relays are stored yet
+  useEffect(() => {
+    if (!deviceId) return;
+
+    const unsubscribes: (() => void)[] = [];
+    
+    // Listen to each relay individually
+    for (let i = 1; i <= 4; i++) {
+      const relayRef = ref(database, `devices/${deviceId}/relays/${i}`);
+      const unsubscribe = onValue(relayRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const relayData = snapshot.val();
+          const state = relayData.state === 'ON' || relayData.state === 'on' || relayData.state === true;
+          setRelayStates(prev => {
+            const newStates = [...prev];
+            newStates[i - 1] = state;
+            return newStates;
+          });
+        }
+      });
+      unsubscribes.push(unsubscribe);
+    }
+
+    return () => unsubscribes.forEach(unsub => unsub());
+  }, [deviceId]);
 
   // Load existing boundary coordinates from Firestore
   useEffect(() => {
@@ -139,19 +187,8 @@ export default function DeviceDetail() {
       connectedAt: new Date().toISOString(),
     }));
     setDeviceReadings([{ deviceId, npk: paddyLiveData.data, status: 'connected' }]);
-
-    // Auto-log NPK readings if available
-    (async () => {
-      const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
-      if (paddyLiveData.data && (paddyLiveData.data.nitrogen !== undefined || paddyLiveData.data.phosphorus !== undefined || paddyLiveData.data.potassium !== undefined)) {
-        await autoLogReadings(user.uid, fieldInfo.id, paddyInfo.id, {
-          n: paddyLiveData.data.nitrogen,
-          p: paddyLiveData.data.phosphorus,
-          k: paddyLiveData.data.potassium,
-          timestamp: paddyLiveData.data.timestamp?.getTime(),
-        });
-      }
-    })();
+    
+    // Cloud Functions automatically log sensor data from RTDB to Firestore
   }, [paddyLiveData.data, user, paddyInfo, fieldInfo, deviceId]);
 
   // Real-time RTDB listener for live chart updates
@@ -241,8 +278,11 @@ export default function DeviceDetail() {
     setCurrentPage(1);
   }, [timeRange]);
     
-  // Get device status - use paddyLiveData from Firestore
+  // Get device status - use Cloud Function's online status determination
   const getDeviceStatusDisplay = () => {
+    // Use the online status computed by Cloud Function (handles heartbeat conversion)
+    const isDeviceOnline = deviceOnlineStatus?.online === true;
+    
     const hasNPK = paddyLiveData.data && (
       paddyLiveData.data.nitrogen !== undefined || 
       paddyLiveData.data.phosphorus !== undefined || 
@@ -259,30 +299,30 @@ export default function DeviceDetail() {
       };
     }
     
-    // Check if data is recent (within last 15 minutes)
-    const isRecent = paddyLiveData.data?.timestamp && 
-      (Date.now() - paddyLiveData.data.timestamp.getTime()) < 15 * 60 * 1000;
-    
-    if (!paddyLiveData.data) {
+    // If device is offline according to Cloud Function
+    if (!isDeviceOnline && deviceOnlineStatus) {
+      const lastChecked = new Date(deviceOnlineStatus.lastChecked).toLocaleString();
       return {
         status: 'offline',
-        message: 'Device is offline. No data received. Check power and network connection.',
+        message: `Device is offline. Last checked: ${lastChecked}. Check power and network connection.`,
         color: 'red',
         badge: 'Offline',
-        lastUpdate: 'No data'
+        lastUpdate: lastChecked
       };
     }
     
-    if (!isRecent) {
-      const lastSeen = paddyLiveData.data.timestamp 
-        ? paddyLiveData.data.timestamp.toLocaleString() 
-        : 'Unknown';
+    // Device is online (according to heartbeat monitor)
+    // Check if we have recent sensor data
+    const hasRecentData = paddyLiveData.data?.timestamp && 
+      (Date.now() - paddyLiveData.data.timestamp.getTime()) < 15 * 60 * 1000;
+    
+    if (!paddyLiveData.data || !hasRecentData) {
       return {
-        status: 'offline',
-        message: `Device offline. Last seen: ${lastSeen}`,
-        color: 'red',
-        badge: 'Offline',
-        lastUpdate: lastSeen
+        status: 'sensor-issue',
+        message: 'Device connected but no recent sensor readings. Sensor may need calibration.',
+        color: 'yellow',
+        badge: 'Sensor Issue',
+        lastUpdate: deviceOnlineStatus ? new Date(deviceOnlineStatus.lastChecked).toLocaleTimeString() : 'Recently'
       };
     }
     
@@ -616,13 +656,15 @@ export default function DeviceDetail() {
     const newState = !relayStates[relayIndex];
     const relayNum = relayIndex + 1;
     
+    // Set processing state
+    const newProcessingStates = [...relayProcessing];
+    newProcessingStates[relayIndex] = true;
+    setRelayProcessing(newProcessingStates);
+    
     try {
-      // Import the performDeviceAction function from field page
-      const cmd = `relay:${relayNum}:${newState ? 'on' : 'off'}`;
-      
-      // For now, send via sendDeviceCommand with relay role
+      // Import the sendDeviceCommand function
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
-      await sendDeviceCommand(
+      const result = await sendDeviceCommand(
         deviceId,
         'ESP32A', // Relay controller node
         'relay',
@@ -631,47 +673,67 @@ export default function DeviceDetail() {
         user.uid
       );
       
-      // Update local state
-      const newRelayStates = [...relayStates];
-      newRelayStates[relayIndex] = newState;
-      setRelayStates(newRelayStates);
-      
-      // Show feedback
-      const msg = `✓ Relay ${relayNum} turned ${newState ? 'ON' : 'OFF'}`;
-      alert(msg);
-      console.log(msg);
+      if (result.success && result.status === 'completed') {
+        // Update local state only on success
+        const newRelayStates = [...relayStates];
+        newRelayStates[relayIndex] = newState;
+        setRelayStates(newRelayStates);
+        
+        // Show success feedback
+        const msg = `✓ Relay ${relayNum} turned ${newState ? 'ON' : 'OFF'}`;
+        console.log(msg);
+        
+        // Optional: Show toast notification instead of alert
+        // For now, we'll skip the alert to avoid blocking UI
+      } else if (result.status === 'timeout') {
+        // Timeout - device may be offline
+        alert(`⏱️ Relay ${relayNum} command timeout. Device may be offline or busy. Please check device status.`);
+      } else {
+        // Other error
+        throw new Error(result.message || 'Command failed');
+      }
     } catch (error) {
       console.error('Error toggling relay:', error);
-      alert('Failed to toggle relay. Please try again.');
+      alert(`Failed to toggle Relay ${relayNum}. ${error instanceof Error ? error.message : 'Please try again.'}`);
+    } finally {
+      // Clear processing state
+      const newProcessingStates = [...relayProcessing];
+      newProcessingStates[relayIndex] = false;
+      setRelayProcessing(newProcessingStates);
     }
   };
 
-  // Device restart handler
-  const handleRestartDevice = async () => {
+  // Motor control handler
+  const handleMotorToggle = async () => {
     if (!user) return;
+
+    const motorAction = motorExtended ? 'retract' : 'extend';
     
-    const confirmed = confirm('This will restart the device. Connection will be temporarily lost. Continue?');
-    if (!confirmed) return;
-    
-    setIsRestartingDevice(true);
+    setMotorProcessing(true);
     try {
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
-      // Send restart as a relay action (generic command)
-      await sendDeviceCommand(
+      const result = await sendDeviceCommand(
         deviceId,
-        'ESP32C',
-        'relay',
-        'restart',
-        {},
+        'ESP32B',
+        'motor',
+        motorAction,
+        { duration: 5000 },
         user.uid
       );
-      
-      alert('✓ Device restart command sent. Please wait for the device to reconnect.');
+
+      if (result.success && result.status === 'completed') {
+        setMotorExtended(!motorExtended);
+        console.log(`✓ Motor ${motorAction}ed successfully`);
+      } else if (result.status === 'timeout') {
+        alert(`⏱️ Motor command timeout. Device may be offline.`);
+      } else {
+        throw new Error(result.message || 'Command failed');
+      }
     } catch (error) {
-      console.error('Error restarting device:', error);
-      alert('Failed to send restart command. Please try again.');
+      console.error('Error toggling motor:', error);
+      alert(`Failed to ${motorAction} motor. ${error instanceof Error ? error.message : 'Please try again.'}`);
     } finally {
-      setIsRestartingDevice(false);
+      setMotorProcessing(false);
     }
   };
 
@@ -735,7 +797,6 @@ export default function DeviceDetail() {
                     <button
                       onClick={() => router.push(`/field/${fieldInfo.id}`)}
                       className="text-white hover:text-white/80 transition-colors"
-                      style={{ fontFamily: "'Courier New', Courier, monospace" }}
                     >
                       {fieldInfo.fieldName}
                     </button>
@@ -744,7 +805,7 @@ export default function DeviceDetail() {
                 <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
-                <span className="font-medium text-white" style={{ fontFamily: "'Courier New', Courier, monospace" }}>{paddyInfo?.paddyName || 'Device'}</span>
+                <span className="font-medium text-white">{paddyInfo?.paddyName || 'Device'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <NotificationBell />
@@ -762,130 +823,39 @@ export default function DeviceDetail() {
         </nav>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: "'Courier New', Courier, monospace" }}>Device Status</h2>
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                deviceStatus.color === 'green' ? 'bg-green-100 text-green-800' :
-                deviceStatus.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                'bg-red-100 text-red-800'
-              }`}>
-                {deviceStatus.status === 'ok' ? '✓ ' : deviceStatus.status === 'sensor-issue' ? '⚠ ' : '✗ '}
-                {deviceStatus.badge}
-              </span>
-            </div>
-            
-            <div className={`mb-4 p-3 rounded-lg ${
-              deviceStatus.color === 'green' ? 'bg-green-50' :
-              deviceStatus.color === 'yellow' ? 'bg-yellow-50' :
-              'bg-red-50'
-            }`}>
-              <p className="text-sm text-gray-700">{deviceStatus.message}</p>
-            </div>
-            
-            <div className="space-y-3">
-              <div className="flex justify-between py-2 border-b border-gray-100">
-                <span className="text-gray-600">Device ID</span>
-                <span className="font-medium text-gray-900">{deviceId}</span>
-              </div>
-              {gpsData && gpsData.lat && gpsData.lng && (
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-gray-600 flex items-center gap-2">
-                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    Location
-                  </span>
-                  <button
-                    onClick={handleViewLocation}
-                    className="font-medium text-green-600 hover:text-green-700 hover:underline text-sm"
-                  >
-                    {gpsData.lat?.toFixed(5)}, {gpsData.lng?.toFixed(5)}
-                  </button>
-                </div>
-              )}
-              <div className="flex justify-between py-2 border-b border-gray-100">
-                <span className="text-gray-600">Last Update</span>
-                <span className="font-medium text-gray-900">{deviceStatus.lastUpdate}</span>
-              </div>
-            </div>
-          </div>
+          {/* Device Status Component */}
+          <DeviceStatus
+            deviceId={deviceId}
+            deviceStatus={deviceStatus}
+            gpsData={gpsData}
+            onViewLocation={handleViewLocation}
+          />
 
-          {/* Sensor Readings */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4" style={{ fontFamily: "'Courier New', Courier, monospace" }}>Current Readings</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-700">Nitrogen (N)</p>
-                  <span className="text-lg">🧪</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {paddyLiveData.data?.nitrogen !== undefined ? Math.round(paddyLiveData.data.nitrogen) : '--'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-              </div>
-              <div className="p-4 bg-green-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-700">Phosphorus (P)</p>
-                  <span className="text-lg">⚗️</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {paddyLiveData.data?.phosphorus !== undefined ? Math.round(paddyLiveData.data.phosphorus) : '--'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-              </div>
-              <div className="p-4 bg-purple-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-700">Potassium (K)</p>
-                  <span className="text-lg">🔬</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {paddyLiveData.data?.potassium !== undefined ? Math.round(paddyLiveData.data.potassium) : '--'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-              </div>
-              <div className="p-4 bg-orange-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-700">Temperature</p>
-                  <span className="text-lg">🌡️</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {weatherData.loading ? (
-                    <span className="inline-block w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin"></span>
-                  ) : weatherData.temperature !== null ? (
-                    Math.round(weatherData.temperature)
-                  ) : '--'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">°C {weatherData.temperature !== null && <span className="text-orange-500">(GPS)</span>}</p>
-              </div>
-              <div className="p-4 bg-cyan-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-700">Humidity</p>
-                  <span className="text-lg">💧</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {weatherData.loading ? (
-                    <span className="inline-block w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></span>
-                  ) : weatherData.humidity !== null ? (
-                    Math.round(weatherData.humidity)
-                  ) : '--'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">% {weatherData.humidity !== null && <span className="text-cyan-500">(GPS)</span>}</p>
-              </div>
-              <div className="p-4 bg-indigo-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-700">Water Level</p>
-                  <span className="text-lg">🌊</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900">--</p>
-                <p className="text-xs text-gray-500 mt-1">cm</p>
-              </div>
-            </div>
-          </div>
+          {/* Sensor Readings Component */}
+          <SensorReadings
+            paddyLiveData={paddyLiveData}
+            weatherData={weatherData}
+          />
 
-          {/* NPK Statistics */}
+          {/* Control Panel Component - Replaces inline controls */}
+          <ControlPanel
+            isScanning={isScanning}
+            lastScanTime={lastScanTime}
+            scanSuccess={scanSuccess}
+            hasSavedBoundary={hasSavedBoundary}
+            gpsData={gpsData}
+            relayStates={relayStates}
+            relayProcessing={relayProcessing}
+            motorExtended={motorExtended}
+            motorProcessing={motorProcessing}
+            onScanNow={handleScanNow}
+            onOpenBoundaryMap={() => setShowBoundaryModal(true)}
+            onViewLocation={handleViewLocation}
+            onRelayToggle={handleRelayToggle}
+            onMotorToggle={handleMotorToggle}
+          />
+
+          {/* NPK Statistics Component */}
           {user && paddyInfo && fieldInfo && (
             <DeviceStatistics 
               userId={user.uid}
@@ -903,13 +873,13 @@ export default function DeviceDetail() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={async () => {
-                    if (!paddyInfo || !fieldInfo) {
+                    if (!paddyInfo || !fieldInfo || !user) {
                       alert('Device not yet loaded');
                       return;
                     }
                     try {
-                      const { executeDeviceAction } = await import('@/lib/utils/deviceActions');
-                      await executeDeviceAction(deviceId, 'scan', 15000);
+                      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+                      await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, user.uid);
                       alert('Scan initiated successfully');
                     } catch (error: any) {
                       console.error('Scan error:', error);
@@ -1247,8 +1217,8 @@ export default function DeviceDetail() {
           </div>
 
           {/* Control Panel */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4" style={{ fontFamily: "'Courier New', Courier, monospace" }}>Device Controls</h3>
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0" style={{display: 'none'}}>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 ui-heading-mono">Device Controls</h3>
             
             {/* Success Banner */}
             {scanSuccess && (
@@ -1351,19 +1321,35 @@ export default function DeviceDetail() {
                     <h4 className="font-semibold text-gray-900">⚡ Relay 1</h4>
                     <p className="text-xs text-gray-600 mt-1">Toggle relay channel 1</p>
                   </div>
-                  <span className={`text-sm font-bold px-2 py-1 rounded ${relayStates[0] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {relayStates[0] ? 'ON' : 'OFF'}
+                  <span className={`text-sm font-bold px-2 py-1 rounded ${
+                    relayProcessing[0] ? 'bg-yellow-100 text-yellow-700' :
+                    relayStates[0] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {relayProcessing[0] ? 'WAIT' : relayStates[0] ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <button
                   onClick={() => handleRelayToggle(0)}
-                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium ${
-                    relayStates[0]
+                  disabled={relayProcessing[0]}
+                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+                    relayProcessing[0]
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : relayStates[0]
                       ? 'bg-orange-600 hover:bg-orange-700 text-white'
                       : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
                   }`}
                 >
-                  {relayStates[0] ? 'Turn OFF' : 'Turn ON'}
+                  {relayProcessing[0] ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Waiting...
+                    </>
+                  ) : (
+                    relayStates[0] ? 'Turn OFF' : 'Turn ON'
+                  )}
                 </button>
               </div>
               
@@ -1374,38 +1360,85 @@ export default function DeviceDetail() {
                     <h4 className="font-semibold text-gray-900">⚡ Relay 2</h4>
                     <p className="text-xs text-gray-600 mt-1">Toggle relay channel 2</p>
                   </div>
-                  <span className={`text-sm font-bold px-2 py-1 rounded ${relayStates[1] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {relayStates[1] ? 'ON' : 'OFF'}
+                  <span className={`text-sm font-bold px-2 py-1 rounded ${
+                    relayProcessing[1] ? 'bg-yellow-100 text-yellow-700' :
+                    relayStates[1] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {relayProcessing[1] ? 'WAIT' : relayStates[1] ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <button
                   onClick={() => handleRelayToggle(1)}
-                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium ${
-                    relayStates[1]
+                  disabled={relayProcessing[1]}
+                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
+                    relayProcessing[1]
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : relayStates[1]
                       ? 'bg-orange-600 hover:bg-orange-700 text-white'
                       : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
                   }`}
                 >
-                  {relayStates[1] ? 'Turn OFF' : 'Turn ON'}
+                  {relayProcessing[1] ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Waiting...
+                    </>
+                  ) : (
+                    relayStates[1] ? 'Turn OFF' : 'Turn ON'
+                  )}
                 </button>
               </div>
-              
-              {/* Device Restart */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-red-500 transition-colors">
+            </div>
+          </div>
+
+          {/* Motor Controller (ESP32B) */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6" style={{display: 'none'}}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Motor Controller (ESP32B)</h3>
+              <span className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded-full">ESP32B</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Motor Control */}
+              <div className="p-4 border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
                 <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">🔄 Device Control</h4>
-                    <p className="text-xs text-gray-600 mt-1">Restart device</p>
-                  </div>
-                  <span className="text-2xl">⚙️</span>
+                  <h4 className="font-semibold text-gray-900">Motor</h4>
+                  <span className="text-lg">{motorExtended ? '⬆️' : '⬇️'}</span>
                 </div>
                 <button
-                  onClick={handleRestartDevice}
-                  disabled={isRestartingDevice}
-                  className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                  onClick={handleMotorToggle}
+                  disabled={motorProcessing}
+                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium ${
+                    motorProcessing
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : motorExtended
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
                 >
-                  {isRestartingDevice ? 'Restarting...' : 'Restart Device'}
+                  {motorProcessing ? 'Processing...' : motorExtended ? 'Retract Motor' : 'Extend Motor'}
                 </button>
+              </div>
+
+              {/* Get Location */}
+              <div className="p-4 border border-gray-200 rounded-lg hover:border-purple-500 transition-colors">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-gray-900">Get Location</h4>
+                  <span className="text-lg">📍</span>
+                </div>
+                <button
+                  onClick={handleViewLocation}
+                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                >
+                  View GPS Location
+                </button>
+                {gpsData && gpsData.lat && gpsData.lng && (
+                  <p className="text-xs text-gray-500 mt-2 text-center font-mono">
+                    {gpsData.lat.toFixed(6)}, {gpsData.lng.toFixed(6)}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1562,7 +1595,7 @@ export default function DeviceDetail() {
                 width="100%"
                 height="100%"
                 frameBorder="0"
-                style={{ border: 0, position: 'absolute', inset: 0 }}
+                className="ui-embed-fill"
                 src={`https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&output=embed&z=18`}
                 allowFullScreen
                 title="Map View"
@@ -1914,12 +1947,12 @@ export default function DeviceDetail() {
                     <div className="space-y-6">
                       {/* Map */}
                       {gpsData.lat && gpsData.lng && (
-                        <div className="bg-gray-100 rounded-xl overflow-hidden" style={{ height: '300px' }}>
+                        <div className="bg-gray-100 rounded-xl overflow-hidden ui-map-container">
                           <iframe
                             width="100%"
                             height="100%"
                             frameBorder="0"
-                            style={{ border: 0 }}
+                            className="ui-iframe-reset"
                             src={`https://www.google.com/maps?q=${gpsData.lat},${gpsData.lng}&output=embed&zoom=15`}
                             allowFullScreen
                           />
@@ -2014,7 +2047,7 @@ export default function DeviceDetail() {
         <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
           <SheetContent side="right" className="w-80 sm:w-96 bg-gradient-to-br from-green-50 via-white to-emerald-50 border-l border-green-200/50 p-0 flex flex-col">
             <SheetHeader className="px-6 pt-6 pb-4 border-b border-green-200/50">
-              <SheetTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: "'Courier New', Courier, monospace" }}>
+              <SheetTitle className="text-2xl font-bold text-gray-900 ui-heading-mono">
                 PadBuddy
               </SheetTitle>
             </SheetHeader>
@@ -2301,7 +2334,7 @@ function TrendsChart({ logs }: { logs: Array<{ timestamp: Date; nitrogen?: numbe
   };
 
   return (
-    <div style={{ height: 320 }}>
+    <div className="ui-chart">
       <Line data={data} options={options} />
     </div>
   );

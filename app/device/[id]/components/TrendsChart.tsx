@@ -74,7 +74,7 @@ export function TrendsChart({ logs }: TrendsChartProps) {
   };
 
   return (
-    <div style={{ height: 320 }}>
+    <div className="ui-chart">
       <Line data={data} options={options} />
     </div>
   );

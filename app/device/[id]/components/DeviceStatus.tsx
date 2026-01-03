@@ -23,7 +23,7 @@ export function DeviceStatus({
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: "'Courier New', Courier, monospace" }}>Device Status</h2>
+        <h2 className="text-xl font-bold text-gray-900 ui-heading-mono">Device Status</h2>
         <span className={`px-3 py-1 rounded-full text-sm font-medium ${
           deviceStatus.color === 'green' ? 'bg-green-100 text-green-800' :
           deviceStatus.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :

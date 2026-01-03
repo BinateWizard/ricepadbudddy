@@ -7,8 +7,6 @@ import { database, db } from '@/lib/firebase';
 import { ref as dbRef, onValue, off, push, set } from 'firebase/database';
 import { onDeviceValue } from '@/lib/utils/rtdbHelper';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
-import { sendDeviceAction, executeDeviceAction } from '@/lib/utils/deviceActions';
-import { waitForDeviceActionComplete } from '@/lib/utils/deviceActions';
 import { sendDeviceCommand } from '@/lib/utils/deviceCommands';
 
 const TABS = [
@@ -67,30 +65,6 @@ function waitForAck(id: string, timeoutMs = 10000): Promise<boolean> {
   });
 }
 
-// perform device action: send -> wait for ack -> optionally wait for completion -> fetch result -> log to Firestore
-async function performDeviceAction(deviceId: string, command: string, fetchResult?: () => Promise<any>) {
-  try {
-    await sendDeviceAction(deviceId, command);
-    const ack = await waitForAck(deviceId, 10000);
-    let completed = false;
-    if (ack) {
-      try {
-        await waitForDeviceActionComplete(deviceId, 30000);
-        completed = true;
-      } catch (e) {
-        // timed out or error; proceed to fetch whatever is available
-      }
-    }
-
-    const result = fetchResult ? await fetchResult() : await getDeviceStatus(deviceId);
-    await logControlAction({ deviceId, action: command, details: { acknowledged: ack, completed, result } });
-    return { acknowledged: ack, completed, result };
-  } catch (e) {
-    await logControlAction({ deviceId, action: command, details: { error: String(e) } });
-    throw e;
-  }
-}
-
 interface ControlPanelTabProps {
   paddies?: any[];
   fieldId?: string;
@@ -136,7 +110,7 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
   }, [activeTab, paddies]);
 
   // Simple relay sender for ESP32A
-  const sendRelayCommand = async (deviceId: string, relay: 1 | 2, action: 'on' | 'off' | 'toggle') => {
+  const sendRelayCommand = async (deviceId: string, relay: 1 | 2 | 3 | 4, action: 'on' | 'off' | 'toggle') => {
     if (!user) {
       alert('You must be signed in to control relays');
       return;
@@ -144,7 +118,18 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
     const key = `${deviceId}-r${relay}-${action}`;
     setSendingRelay(key);
     try {
-      await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay }, user.uid);
+      const result = await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay }, user.uid);
+      
+      if (result.success) {
+        console.log(`[Relay] Command ${action} sent successfully`, result);
+        // Optionally show success message
+        if (result.status === 'completed') {
+          console.log(`✓ Relay ${relay} turned ${action}`);
+        }
+      } else {
+        console.error(`[Relay] Command failed`, result);
+        alert(`Failed: ${result.message}`);
+      }
     } catch (e) {
       console.error('Failed to send relay command', e);
       alert('Failed to send relay command');
@@ -161,7 +146,7 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
         {/* Modern Tab Controller - preserved original layout. DO NOT MODIFY STYLES BELOW */}
         <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
         {/* Main Content Area */}
-        <div className="bg-white rounded-b-xl rounded-tr-xl shadow p-8 min-h-[200px] h-full flex-1 overflow-y-auto overflow-x-hidden pr-2 text-black" style={{ minHeight: 200 }}>
+        <div className="bg-white/90 backdrop-blur border border-gray-200 rounded-2xl shadow-lg p-8 min-h-[200px] h-full flex-1 overflow-y-auto overflow-x-hidden pr-2 text-black" style={{ minHeight: 200 }}>
           {activeTab === 0 ? (
             loading ? (
               <div className="text-black text-center">Loading status...</div>
@@ -227,21 +212,21 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
                     <div className="mt-4 p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50">
                       <div className="font-semibold mb-3 text-black">Relay Control</div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {[1, 2].map((relay) => (
+                        {[1, 2, 3, 4].map((relay) => (
                           <div key={`relay-${dev.id}-${relay}`} className="flex flex-col gap-2">
                             <div className="text-xs font-semibold text-gray-700">Relay {relay}</div>
                             <div className="flex gap-2">
                               <button
                                 className="flex-1 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-60"
                                 disabled={!!sendingRelay}
-                                onClick={() => sendRelayCommand(dev.id, relay as 1 | 2, 'on')}
+                                onClick={() => sendRelayCommand(dev.id, relay as 1 | 2 | 3 | 4, 'on')}
                               >
                                 On
                               </button>
                               <button
                                 className="flex-1 px-3 py-2 rounded-lg bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition disabled:opacity-60"
                                 disabled={!!sendingRelay}
-                                onClick={() => sendRelayCommand(dev.id, relay as 1 | 2, 'off')}
+                                onClick={() => sendRelayCommand(dev.id, relay as 1 | 2 | 3 | 4, 'off')}
                               >
                                 Off
                               </button>
@@ -351,15 +336,14 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
 // TabBar component - keeps the tab layout stable. Keep classes here in sync with original design.
 function TabBar({ activeTab, setActiveTab }: { activeTab: number; setActiveTab: (i: number) => void; }) {
   return (
-    <div className="flex w-full mb-0 h-[64px] min-h-[64px] border-b border-gray-200 bg-transparent flex-shrink-0 z-30 rounded-t-xl overflow-hidden">
+    <div className="flex w-full mb-4 p-1 gap-2 bg-white border border-gray-200 shadow-sm rounded-2xl flex-shrink-0 z-30">
       {TABS.map((tab, idx) => (
         <button
           key={tab.label}
-          className={`flex-1 flex items-center justify-center text-base font-semibold transition-colors focus:outline-none h-full
+          className={`flex-1 h-[56px] min-h-[56px] flex items-center justify-center text-sm sm:text-base font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 rounded-xl border
             ${activeTab === idx
-              ? 'bg-green-600 text-white z-10 shadow-sm rounded-t-lg border-b-4 border-green-600'
-              : 'bg-gray-50 text-gray-600 hover:bg-green-50 border-b-4 border-transparent'}
-            ${idx === 0 ? 'rounded-tl-lg' : ''} ${idx === TABS.length - 1 ? 'rounded-tr-lg' : ''}
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md border-emerald-500 scale-[1.01]'
+              : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200'}
           `}
           style={{ minWidth: 0 }}
           onClick={() => setActiveTab(idx)}
@@ -409,14 +393,14 @@ function FieldLevelRelayControls({ devices, fieldName }: { devices: any[]; field
       const results = await Promise.all(
         Array.from(selectedDevices).map(async (deviceId) => {
           const dev = devices.find(d => d.id === deviceId);
-          const cmd = `relay:${relayIndex + 1}:${next[relayIndex] ? 'on' : 'off'}`;
+          const relayNum = relayIndex + 1;
+          const action = next[relayIndex] ? 'on' : 'off';
           try {
-            const res = await performDeviceAction(deviceId, cmd, async () => {
-              return await getDeviceStatus(deviceId);
-            });
+            const { user } = useAuth();
+            const res = await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay: relayNum }, user?.uid || '');
             
             setDeviceLoadingStates(prev => ({ ...prev, [deviceId]: false }));
-            return { deviceId, paddyName: dev?.paddyName, acknowledged: res.acknowledged, completed: res.completed };
+            return { deviceId, paddyName: dev?.paddyName, acknowledged: res.success, completed: res.status === 'completed' };
           } catch (e) {
             setDeviceLoadingStates(prev => ({ ...prev, [deviceId]: false }));
             return { deviceId, paddyName: dev?.paddyName, acknowledged: false, completed: false, error: String(e) };
@@ -471,12 +455,14 @@ function FieldLevelRelayControls({ devices, fieldName }: { devices: any[]; field
     
     // Send command to revert
     setLoadingRelays(prev => new Set([...prev, relayIndex]));
-    const cmd = `relay:${relayIndex + 1}:${previousState ? 'on' : 'off'}`;
+    const relayNum = relayIndex + 1;
+    const action = previousState ? 'on' : 'off';
     
     try {
+      const { user } = useAuth();
       await Promise.all(
         Array.from(selectedDevices).map(deviceId => 
-          performDeviceAction(deviceId, cmd, async () => getDeviceStatus(deviceId))
+          sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay: relayNum }, user?.uid || '')
         )
       );
       setMessages({ ...messages, [relayIndex]: '↶ Action reversed successfully' });
@@ -720,20 +706,20 @@ function RelayControlsPerDevice({ deviceId, paddyName }: { deviceId: string; pad
     setLoadingRelays(prev => new Set([...prev, index]));
     setMessages({ ...messages, [index]: 'Sending...' });
 
-    const cmd = `relay:${index + 1}:${next[index] ? 'on' : 'off'}`;
+    const relayNum = index + 1;
+    const action = next[index] ? 'on' : 'off';
     try {
-      const res = await performDeviceAction(deviceId, cmd, async () => {
-        return await getDeviceStatus(deviceId);
-      });
+      const { user } = useAuth();
+      const res = await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay: relayNum }, user?.uid || '');
 
-      if (res.acknowledged) {
-        if (res.completed) {
+      if (res.success) {
+        if (res.status === 'completed') {
           setMessages({ ...messages, [index]: next[index] ? '✓ ON' : '✓ OFF' });
         } else {
-          setMessages({ ...messages, [index]: next[index] ? '⚠ Ack (incomplete)' : '⚠ Ack (incomplete)' });
+          setMessages({ ...messages, [index]: next[index] ? '⚠ Pending' : '⚠ Pending' });
         }
       } else {
-        setMessages({ ...messages, [index]: '✗ No ack' });
+        setMessages({ ...messages, [index]: '✗ Failed' });
         setRelayStates(prev); // revert
       }
 
@@ -863,23 +849,23 @@ function RelayControls({ deviceId, deviceCount }: { deviceId: string; deviceCoun
     setBusyIndex(index);
     setMessages({ ...messages, [index]: 'Sending...' });
 
-    const cmd = `relay:${index + 1}:${next[index] ? 'on' : 'off'}`;
+    const relayNum = index + 1;
+    const action = next[index] ? 'on' : 'off';
     try {
-      const res = await performDeviceAction(deviceId, cmd, async () => {
-        return await getDeviceStatus(deviceId);
-      });
+      const { user } = useAuth();
+      const res = await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay: relayNum }, user?.uid || '');
 
-      setLastAck({ ...lastAck, [index]: res.acknowledged });
+      setLastAck({ ...lastAck, [index]: res.success });
 
-      if (res.acknowledged) {
-        if (res.completed) {
+      if (res.success) {
+        if (res.status === 'completed') {
           setMessages({ ...messages, [index]: next[index] ? '✓ Relay ON' : '✓ Relay OFF' });
         } else {
-          setMessages({ ...messages, [index]: next[index] ? '⚠ Acknowledged (incomplete)' : '⚠ Acknowledged (incomplete)' });
+          setMessages({ ...messages, [index]: next[index] ? '⚠ Pending' : '⚠ Pending' });
         }
       } else {
-        setMessages({ ...messages, [index]: '✗ No ack (timeout)' });
-        setStates(prev); // revert on no ack
+        setMessages({ ...messages, [index]: '✗ Failed' });
+        setStates(prev); // revert on failure
       }
 
       setTimeout(() => setMessages(m => { delete m[index]; return { ...m }; }), 4000);
@@ -920,186 +906,6 @@ function RelayControls({ deviceId, deviceCount }: { deviceId: string; deviceCoun
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-// MotorControls component - FULLY FUNCTIONAL
-function MotorControls({ deviceId }: { deviceId: string }) {
-  const [running, setRunning] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const start = async () => {
-    try {
-      setBusy(true);
-      setMessage('Starting motor...');
-      const res = await performDeviceAction(deviceId, 'motor:start', async () => {
-        return await getDeviceStatus(deviceId);
-      });
-      setRunning(true);
-      setMessage(res.acknowledged ? '✓ Motor started' : '⚠ No ack - may not have started');
-      setTimeout(() => setMessage(null), 3000);
-    } catch (e) {
-      console.error(e);
-      setMessage(`✗ ${(e as Error).message || 'Start failed'}`);
-      setTimeout(() => setMessage(null), 3000);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stop = async () => {
-    try {
-      setBusy(true);
-      setMessage('Stopping motor...');
-      const res = await performDeviceAction(deviceId, 'motor:stop', async () => {
-        return await getDeviceStatus(deviceId);
-      });
-      setRunning(false);
-      setMessage(res.acknowledged ? '✓ Motor stopped' : '⚠ No ack - may not have stopped');
-      setTimeout(() => setMessage(null), 3000);
-    } catch (e) {
-      console.error(e);
-      setMessage(`✗ ${(e as Error).message || 'Stop failed'}`);
-      setTimeout(() => setMessage(null), 3000);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <button onClick={start} disabled={busy || running} className="py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded font-medium disabled:bg-gray-400">
-          {busy && !running ? '⏳ Starting...' : 'Start'}
-        </button>
-        <button onClick={stop} disabled={busy || !running} className="py-2 px-4 bg-red-600 hover:bg-red-700 text-white rounded font-medium disabled:bg-gray-400">
-          {busy && running ? '⏳ Stopping...' : 'Stop'}
-        </button>
-        <div className="text-sm text-black font-medium">{running ? '▶ Running' : '⏹ Stopped'}</div>
-      </div>
-      {message && <div className="text-sm text-gray-700 font-medium">{message}</div>}
-    </div>
-  );
-}
-
-// NPKControls - FULLY FUNCTIONAL
-function NPKControls({ deviceId }: { deviceId: string }) {
-  const [reading, setReading] = useState<any | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const read = async () => {
-    try {
-      setBusy(true);
-      setMessage('Requesting reading...');
-      const res = await performDeviceAction(deviceId, 'npk:read', async () => {
-        return await getDeviceNPK(deviceId);
-      });
-      
-      if (res.result) {
-        setReading(res.result);
-        setMessage(res.acknowledged ? '✓ Reading received' : '⚠ Reading (no ack)');
-      } else {
-        setMessage('⚠ No reading data received');
-      }
-      setTimeout(() => setMessage(null), 4000);
-    } catch (e) {
-      console.error(e);
-      setMessage(`✗ ${(e as Error).message || 'Request failed'}`);
-      setTimeout(() => setMessage(null), 3000);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      <button onClick={read} disabled={busy} className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium disabled:bg-gray-400 w-fit">
-        {busy ? '⏳ Reading...' : 'Read NPK'}
-      </button>
-      {reading && (
-        <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
-          <div className="text-sm text-black font-medium mb-2">Latest Reading:</div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">{reading.n ?? '--'}</div>
-              <div className="text-xs text-gray-600">Nitrogen (N)</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">{reading.p ?? '--'}</div>
-              <div className="text-xs text-gray-600">Phosphorus (P)</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-orange-600">{reading.k ?? '--'}</div>
-              <div className="text-xs text-gray-600">Potassium (K)</div>
-            </div>
-          </div>
-          {reading.timestamp && (
-            <div className="text-xs text-gray-500 mt-2">Read at: {formatTimeAgo(reading.timestamp)}</div>
-          )}
-        </div>
-      )}
-      {message && <div className="text-sm text-gray-700 font-medium">{message}</div>}
-    </div>
-  );
-}
-
-// GPSControls - FULLY FUNCTIONAL
-function GPSControls({ deviceId }: { deviceId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [last, setLast] = useState<any | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const request = async () => {
-    try {
-      setBusy(true);
-      setMessage('Requesting GPS location...');
-      const res = await performDeviceAction(deviceId, 'gps:request', async () => {
-        return await getDeviceGPS(deviceId);
-      });
-      
-      if (res.result) {
-        setLast(res.result);
-        setMessage(res.acknowledged ? '✓ Location received' : '⚠ Location (no ack)');
-      } else {
-        setMessage('⚠ No location data received');
-      }
-      setTimeout(() => setMessage(null), 4000);
-    } catch (e) {
-      console.error(e);
-      setMessage(`✗ ${(e as Error).message || 'Request failed'}`);
-      setTimeout(() => setMessage(null), 3000);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      <button onClick={request} disabled={busy} className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-medium disabled:bg-gray-400 w-fit">
-        {busy ? '⏳ Requesting...' : 'Request Location'}
-      </button>
-      {last && last.lat && last.lng && (
-        <div className="p-4 rounded-lg bg-indigo-50 border border-indigo-200">
-          <div className="text-sm text-black font-medium mb-2">Latest Location:</div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="text-lg font-mono text-indigo-600">{last.lat.toFixed(6)}</div>
-              <div className="text-xs text-gray-600">Latitude</div>
-            </div>
-            <div>
-              <div className="text-lg font-mono text-indigo-600">{last.lng.toFixed(6)}</div>
-              <div className="text-xs text-gray-600">Longitude</div>
-            </div>
-          </div>
-          {last.ts && (
-            <div className="text-xs text-gray-500 mt-2">Location received: {formatTimeAgo(last.ts)}</div>
-          )}
-        </div>
-      )}
-      {message && <div className="text-sm text-gray-700 font-medium">{message}</div>}
     </div>
   );
 }
@@ -1183,27 +989,18 @@ function LocationControls({ devices }: { devices: Array<{ id: string; label?: st
 
   const requestLocationFor = async (id: string) => {
     try {
-      // send action to device
-      await sendDeviceAction(id, 'gps:request');
+      const { user } = useAuth();
+      // Send GPS request to ESP32B (motor controller has GPS)
+      const res = await sendDeviceCommand(id, 'ESP32B', 'motor', 'get_location', {}, user?.uid || '');
 
-      // wait for ack up to 10s
-      const ack = await waitForAck(id, 10000);
-
-      // If ack received, wait for completion (action='done') up to 30s
-      if (ack) {
-        try {
-          await executeDeviceAction(id, 'gps:request', 30000);
-        } catch (e) {
-          // ignore — we'll fetch whatever gps we have
-        }
+      if (res.success) {
+        // Fetch GPS data
+        const gps = await getDeviceGPS(id);
+        setLocations((prev) => ({ ...prev, [id]: gps }));
+        await logAction({ deviceId: id, action: 'location:fetch', details: { success: true, gps } });
+      } else {
+        await logAction({ deviceId: id, action: 'location:fetch', details: { success: false, message: res.message } });
       }
-
-      // fetch GPS (one-off)
-      const gps = await getDeviceGPS(id);
-      setLocations((prev) => ({ ...prev, [id]: gps }));
-
-      // log the fetch with ack status and gps
-      await logAction({ deviceId: id, action: 'location:fetch', details: { acknowledged: ack, gps } });
     } catch (e) {
       console.error('requestLocationFor error', e);
       await logAction({ deviceId: id, action: 'location:fetch', details: { error: String(e) } });

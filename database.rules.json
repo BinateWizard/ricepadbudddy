@@ -72,6 +72,16 @@
         "timestamp": {
           ".read": "auth != null",
           ".write": true
+        },
+        // Commands - authenticated users can send commands
+        "commands": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        },
+        // Audit logs - authenticated users can write audit entries
+        "audit": {
+          ".read": "auth != null",
+          ".write": "auth != null"
         }
       }
     }
