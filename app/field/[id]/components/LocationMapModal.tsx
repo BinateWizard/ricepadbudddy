@@ -7,7 +7,7 @@ interface LocationMapModalProps {
   onClose: () => void;
   selectedPaddy: any;
   loadingLocation: boolean;
-  locationData: { lat: number; lng: number; timestamp: number } | null;
+  locationData: { lat: number; lng: number; timestamp?: number } | null;
   otherDevicesHaveLocation: boolean;
 }
 
@@ -72,7 +72,7 @@ export function LocationMapModal({
                       </svg>
                       <div>
                         <p className="text-sm font-medium text-gray-900">Last location</p>
-                        <p className="text-xs text-gray-600 mt-0.5">{getTimeAgo(locationData.timestamp)}</p>
+                        <p className="text-xs text-gray-600 mt-0.5">{locationData.timestamp ? getTimeAgo(locationData.timestamp) : 'Unknown'}</p>
                       </div>
                     </div>
                     <button

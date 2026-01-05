@@ -36,53 +36,14 @@ import { PaddiesTab } from './components/PaddiesTab';
 import { StatisticsTab } from './components/StatisticsTab';
 import ControlPanelTab from './components/ControlPanelTab';
 import { InformationTab } from './components/InformationTab';
+import { FieldHeader } from './components/FieldHeader';
+import { FieldTabNavigation } from './components/FieldTabNavigation';
+import { AddPaddyModal } from './components/AddPaddyModal';
+import { LocationMapModal } from './components/LocationMapModal';
 
 // Pre-import utility modules to avoid dynamic import timing issues
 import { getDeviceData as getDeviceStatus, getDeviceGPS } from '@/lib/utils/deviceStatus';
-
-/**
- * Log sensor readings to Firestore for historical tracking
- * 
- * This function saves NPK and other sensor readings with timestamps
- * to enable historical data analysis and trend visualization.
- * 
- * Usage:
- * await logSensorReading(user.uid, fieldId, paddyId, {
- *   nitrogen: 45.2,
- *   phosphorus: 12.8,
- *   potassium: 38.5
- * });
- * 
- * Data is stored in: users/{userId}/fields/{fieldId}/paddies/{paddyId}/logs/{logId}
- * Each log automatically includes timestamp and createdAt fields
- */
-async function logSensorReading(
-  userId: string, 
-  fieldId: string, 
-  paddyId: string, 
-  readings: {
-    nitrogen?: number;
-    phosphorus?: number;
-    potassium?: number;
-    temperature?: number;
-    humidity?: number;
-    waterLevel?: number;
-  }
-) {
-  try {
-    const logsRef = collection(db, `users/${userId}/fields/${fieldId}/paddies/${paddyId}/logs`);
-    await addDoc(logsRef, {
-      ...readings,
-      timestamp: serverTimestamp(),
-      createdAt: new Date().toISOString()
-    });
-    console.log('Sensor reading logged successfully');
-    return true;
-  } catch (error) {
-    console.error('Error logging sensor reading:', error);
-    return false;
-  }
-}
+import { logSensorReading } from '@/lib/utils/fieldHelpers';
 
 export default function FieldDetail() {
   const params = useParams();
@@ -98,14 +59,6 @@ export default function FieldDetail() {
   
   // Add device modal state
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
-  const [paddyName, setPaddyName] = useState("");
-  const [paddyDescription, setPaddyDescription] = useState("");
-  const [deviceId, setDeviceId] = useState("");
-  const [paddyShapeType, setPaddyShapeType] = useState<"rectangle" | "trapezoid">("rectangle");
-  const [paddyLength, setPaddyLength] = useState("");
-  const [paddyWidth, setPaddyWidth] = useState("");
-  const [paddyWidth2, setPaddyWidth2] = useState("");
-  const [errors, setErrors] = useState<{[key: string]: string}>({});
   const [isVerifying, setIsVerifying] = useState(false);
   
   // Map modal state
@@ -121,22 +74,6 @@ export default function FieldDetail() {
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [isScanning, setIsScanning] = useState(false);
   const [scanResults, setScanResults] = useState<{[deviceId: string]: {status: string; message: string}}>({});
-  
-  // Format time ago
-  const getTimeAgo = (timestamp: any) => {
-    if (!timestamp) return 'Unknown';
-    const now = Date.now();
-    const diff = now - timestamp;
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-    
-    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-    return 'Just now';
-  };
 
   // TODO: Implement automatic logging of sensor readings
   // When device readings are received from Firebase RTDB, call logSensorReading():
@@ -365,81 +302,68 @@ export default function FieldDetail() {
   }, [activeTab, paddies.length, fetchDeviceReadings]);
   
   // Calculate area based on paddy shape
-  const calculatePaddyArea = () => {
-    if (!paddyLength) return null;
+  const calculatePaddyArea = (
+    shapeType: 'rectangle' | 'trapezoid',
+    length: string,
+    width: string,
+    width2: string
+  ) => {
+    if (!length) return null;
     
-    if (paddyShapeType === 'rectangle') {
-      if (!paddyWidth) return null;
-      return parseFloat(paddyLength) * parseFloat(paddyWidth);
-    } else if (paddyShapeType === 'trapezoid') {
-      if (!paddyWidth || !paddyWidth2) return null;
-      return ((parseFloat(paddyWidth) + parseFloat(paddyWidth2)) / 2) * parseFloat(paddyLength);
+    if (shapeType === 'rectangle') {
+      if (!width) return null;
+      return parseFloat(length) * parseFloat(width);
+    } else if (shapeType === 'trapezoid') {
+      if (!width || !width2) return null;
+      return ((parseFloat(width) + parseFloat(width2)) / 2) * parseFloat(length);
     }
     return null;
   };
   
   // Handle add device submission
-  const handleAddDevice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const newErrors: {[key: string]: string} = {};
-    
-    if (!paddyName.trim()) newErrors.paddyName = "Please enter a paddy name";
-    if (!deviceId.trim()) {
-      newErrors.deviceId = "Please enter a device ID";
-    } else {
-      const deviceIdPattern = /^DEVICE_\d{4}$/;
-      if (!deviceIdPattern.test(deviceId)) {
-        newErrors.deviceId = "Invalid format. Use DEVICE_0001 format";
-      }
-    }
-    
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-    
+  const handleAddDevice = async (data: {
+    paddyName: string;
+    paddyDescription: string;
+    deviceId: string;
+    paddyShapeType: 'rectangle' | 'trapezoid';
+    paddyLength: string;
+    paddyWidth: string;
+    paddyWidth2: string;
+  }) => {
     setIsVerifying(true);
     try {
       if (!user) {
-        setErrors({ submit: "Session error. Please try again." });
-        setIsVerifying(false);
-        return;
+        throw new Error("Session error. Please try again.");
       }
 
       // Verify device exists in RTDB and is not owned/connected to another user
-      const deviceData = await getDeviceData(deviceId.trim(), '');
+      const deviceData = await getDeviceData(data.deviceId.trim(), '');
 
       if (!deviceData) {
-        setErrors({ deviceId: "Device not found. Please check the ID" });
-        setIsVerifying(false);
-        return;
+        throw new Error("Device not found. Please check the ID");
       }
 
       if (deviceData?.ownedBy && deviceData.ownedBy !== user.uid) {
-        setErrors({ deviceId: "Device is already owned by another user. Access restricted due to policy changes." });
-        setIsVerifying(false);
-        return;
+        throw new Error("Device is already owned by another user. Access restricted due to policy changes.");
       }
 
       if (deviceData?.connectedTo && deviceData.connectedTo !== user.uid) {
-        setErrors({ deviceId: "Device is already connected to another user" });
-        setIsVerifying(false);
-        return;
+        throw new Error("Device is already connected to another user");
       }
 
-      const areaM2 = calculatePaddyArea();
+      const areaM2 = calculatePaddyArea(data.paddyShapeType, data.paddyLength, data.paddyWidth, data.paddyWidth2);
       const areaHectares = areaM2 ? areaM2 / 10000 : null;
 
       // Create paddy document with area metadata
       const paddyRef = doc(collection(db, `users/${user.uid}/fields/${fieldId}/paddies`));
       await setDoc(paddyRef, {
-        paddyName: paddyName.trim(),
-        description: paddyDescription.trim(),
-        deviceId: deviceId.trim(),
-        shapeType: paddyShapeType,
-        length: paddyLength ? parseFloat(paddyLength) : null,
-        width: paddyWidth ? parseFloat(paddyWidth) : null,
-        width2: paddyShapeType === 'trapezoid' && paddyWidth2 ? parseFloat(paddyWidth2) : null,
+        paddyName: data.paddyName.trim(),
+        description: data.paddyDescription.trim(),
+        deviceId: data.deviceId.trim(),
+        shapeType: data.paddyShapeType,
+        length: data.paddyLength ? parseFloat(data.paddyLength) : null,
+        width: data.paddyWidth ? parseFloat(data.paddyWidth) : null,
+        width2: data.paddyShapeType === 'trapezoid' && data.paddyWidth2 ? parseFloat(data.paddyWidth2) : null,
         areaM2,
         areaHectares,
         connectedAt: new Date().toISOString(),
@@ -448,13 +372,13 @@ export default function FieldDetail() {
       });
 
       // Update device in RTDB to mark it as connected to this user and field
-      const deviceRef = ref(database, `devices/${deviceId.trim()}`);
+      const deviceRef = ref(database, `devices/${data.deviceId.trim()}`);
       await update(deviceRef, {
         ownedBy: user.uid,
         connectedTo: user.uid,
         connectedAt: new Date().toISOString(),
         fieldId,
-        paddyName: paddyName.trim(),
+        paddyName: data.paddyName.trim(),
         status: 'connected'
       });
       
@@ -466,20 +390,6 @@ export default function FieldDetail() {
         ...doc.data()
       }));
       setPaddies(paddiesData);
-      
-      // Close modal and reset form
-      setIsAddDeviceModalOpen(false);
-      setPaddyName("");
-      setPaddyDescription("");
-      setDeviceId("");
-      setPaddyShapeType('rectangle');
-      setPaddyLength("");
-      setPaddyWidth("");
-      setPaddyWidth2("");
-      setErrors({});
-    } catch (error) {
-      console.error("Error adding device:", error);
-      setErrors({ submit: "Failed to add device. Please try again." });
     } finally {
       setIsVerifying(false);
     }
@@ -567,159 +477,14 @@ export default function FieldDetail() {
     <ProtectedRoute>
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50">
         {/* Header */}
-        <nav className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-30 border-b border-green-100">
-          <div className="w-full px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              {/* Breadcrumb Navigation */}
-              <div className="flex items-center gap-2 text-sm">
-                <button
-                  onClick={() => router.push('/')}
-                  className="flex items-center text-green-600 hover:text-green-800 transition-colors p-2 hover:bg-green-50 rounded-lg"
-                  title="Home"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                  </svg>
-                </button>
-                <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-                <span className="font-bold text-gray-900">{field.fieldName}</span>
-              </div>
-              
-              {/* Field Status Badges */}
-              <div className="flex items-center gap-2">
-                {field.status === 'harvested' && (
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                    🌾 Harvested
-                  </span>
-                )}
-                {field.status === 'concluded' && (
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                    🔚 Season Ended
-                  </span>
-                )}
-              </div>
-            </div>
-            {/* Field Status badges moved to tab - no header scan UI */}
-          </div>
-        </nav>
+        <FieldHeader field={field} />
 
         {/* Bottom Tab Navigation - Facebook Style */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 safe-area-bottom">
-          <nav className="max-w-lg mx-auto flex justify-around items-center h-16 px-2">
-            {/* Overview Tab */}
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
-                activeTab === 'overview'
-                  ? 'text-emerald-600'
-                  : 'text-gray-400 hover:text-emerald-600'
-              }`}
-            >
-              {/* Active Indicator */}
-              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
-                activeTab === 'overview' ? 'bg-emerald-600' : 'bg-transparent'
-              }`} />
-              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'overview' ? 'scale-110' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'overview' ? 2 : 1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {/* Label - only show when active */}
-              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
-                activeTab === 'overview' ? 'opacity-100' : 'opacity-0 h-0'
-              }`}>Overview</span>
-            </button>
-
-            {/* Paddies Tab */}
-            <button
-              onClick={() => setActiveTab('paddies')}
-              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
-                activeTab === 'paddies'
-                  ? 'text-emerald-600'
-                  : 'text-gray-400 hover:text-emerald-600'
-              }`}
-            >
-              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
-                activeTab === 'paddies' ? 'bg-emerald-600' : 'bg-transparent'
-              }`} />
-              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'paddies' ? 'scale-110' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <rect x="3" y="3" width="7" height="7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'paddies' ? 2 : 1.5} />
-                <rect x="14" y="3" width="7" height="7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'paddies' ? 2 : 1.5} />
-                <rect x="3" y="14" width="7" height="7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'paddies' ? 2 : 1.5} />
-                <rect x="14" y="14" width="7" height="7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'paddies' ? 2 : 1.5} />
-              </svg>
-              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
-                activeTab === 'paddies' ? 'opacity-100' : 'opacity-0 h-0'
-              }`}>Paddies</span>
-            </button>
-
-            {/* Statistics Tab (always visible; disabled if no devices) */}
-            <button
-              onClick={() => {
-                if (!hasDevices) return;
-                setActiveTab('statistics');
-              }}
-              disabled={!hasDevices}
-              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
-                activeTab === 'statistics'
-                  ? 'text-emerald-600'
-                  : hasDevices
-                    ? 'text-gray-400 hover:text-emerald-600'
-                    : 'text-gray-300 cursor-not-allowed'
-              }`}
-            >
-              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
-                activeTab === 'statistics' ? 'bg-emerald-600' : 'bg-transparent'
-              }`} />
-              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'statistics' ? 'scale-110' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'statistics' ? 2 : 1.5} d="M7 16V10M12 16V7M17 16V13" />
-              </svg>
-              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
-                activeTab === 'statistics' ? 'opacity-100' : 'opacity-0 h-0'
-              }`}>Stats</span>
-            </button>
-
-            {/* Information Tab */}
-            <button
-              onClick={() => setActiveTab('information')}
-              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 ${
-                activeTab === 'information'
-                  ? 'text-emerald-600'
-                  : 'text-gray-400 hover:text-emerald-600'
-              }`}
-            >
-              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
-                activeTab === 'information' ? 'bg-emerald-600' : 'bg-transparent'
-              }`} />
-              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'information' ? 'scale-110' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'information' ? 2 : 1.5} d="M13 16H9v-4h4v4zm-8-8h4V4H5v4zm8-4v4h4V4h-4z" />
-              </svg>
-              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
-                activeTab === 'information' ? 'opacity-100' : 'opacity-0 h-0'
-              }`}>Info</span>
-            </button>
-
-            {/* Control Panel Tab */}
-            <button
-              onClick={() => setActiveTab('control-panel')}
-              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 ${
-                activeTab === 'control-panel'
-                  ? 'text-emerald-600 bg-emerald-100'
-                  : 'text-gray-400 hover:text-emerald-600 hover:bg-gray-100'
-              }`}
-            >
-              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
-                activeTab === 'control-panel' ? 'bg-emerald-600' : 'bg-transparent'
-              }`} />
-              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'control-panel' ? 'scale-110' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'control-panel' ? 2 : 1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5a4 4 0 100-8 4 4 0 000 8z" />
-              </svg>
-              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
-                activeTab === 'control-panel' ? 'opacity-100' : 'opacity-0 h-0'
-              }`}>Control</span>
-            </button>
-          </nav>
-        </div>
+        <FieldTabNavigation 
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          hasDevices={hasDevices}
+        />
 
         {/* Content with smooth transitions */}
         <main className="w-full px-2 sm:px-4 lg:px-8 pt-0 sm:pt-6 pb-24">
@@ -810,7 +575,7 @@ export default function FieldDetail() {
         {activeTab === 'paddies' && (
           <button 
             onClick={() => setIsAddDeviceModalOpen(true)}
-            className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-40"
+            className="fixed bottom-20 right-6 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-[60]"
             title="Add New Paddy"
           >
             <span className="text-3xl font-light">+</span>
@@ -818,355 +583,22 @@ export default function FieldDetail() {
         )}
         
         {/* Add Device Modal */}
-        {isAddDeviceModalOpen && (
-          <>
-            {/* Glassmorphism Overlay */}
-            <div 
-              onClick={() => {
-                setIsAddDeviceModalOpen(false);
-                setErrors({});
-                setPaddyName("");
-                setPaddyDescription("");
-                setDeviceId("");
-                setPaddyShapeType('rectangle');
-                setPaddyLength("");
-                setPaddyWidth("");
-                setPaddyWidth2("");
-              }}
-              className="fixed inset-0 backdrop-blur-sm bg-black/20 z-40 transition-all"
-            />
-            
-            {/* Bottom Sheet */}
-            <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up">
-              <div className="bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col border-t-4 border-green-500">
-                {/* Handle Bar */}
-                <div className="flex justify-center pt-3 pb-4">
-                  <div className="w-12 h-1.5 bg-green-300 rounded-full" />
-                </div>
-                
-                {/* Modal Content */}
-                <div className="flex-1 overflow-y-auto px-6 pb-6">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">Add Paddy</h2>
-                  
-                  <form onSubmit={handleAddDevice} className="space-y-5">
-                    {errors.submit && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                        <p className="text-sm text-red-600">{errors.submit}</p>
-                      </div>
-                    )}
+        <AddPaddyModal
+          isOpen={isAddDeviceModalOpen}
+          onClose={() => setIsAddDeviceModalOpen(false)}
+          onSubmit={handleAddDevice}
+          isVerifying={isVerifying}
+        />
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Paddy Name
-                      </label>
-                      <input
-                        type="text"
-                        value={paddyName}
-                        onChange={(e) => {
-                          setPaddyName(e.target.value);
-                          setErrors(prev => ({...prev, paddyName: ""}));
-                        }}
-                        placeholder="e.g., North Paddy"
-                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
-                          errors.paddyName ? 'border-red-400 bg-red-50' : 'border-gray-300'
-                        }`}
-                      />
-                      {errors.paddyName && (
-                        <p className="text-red-500 text-sm mt-1.5 flex items-center gap-1">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          {errors.paddyName}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Description (Optional)
-                      </label>
-                      <textarea
-                        value={paddyDescription}
-                        onChange={(e) => setPaddyDescription(e.target.value)}
-                        placeholder="Add any notes about this paddy"
-                        rows={3}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none bg-white text-gray-900"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Device ID
-                      </label>
-                      <input
-                        type="text"
-                        value={deviceId}
-                        onChange={(e) => {
-                          setDeviceId(e.target.value.toUpperCase());
-                          setErrors(prev => ({...prev, deviceId: ""}));
-                        }}
-                        placeholder="DEVICE_0001"
-                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono bg-white text-gray-900 ${
-                          errors.deviceId ? 'border-red-400 bg-red-50' : 'border-gray-300'
-                        }`}
-                      />
-                      {errors.deviceId && (
-                        <p className="text-red-500 text-sm mt-1.5 flex items-center gap-1">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          {errors.deviceId}
-                        </p>
-                      )}
-                      <p className="mt-1.5 text-xs text-gray-500">Format: DEVICE_0001</p>
-                    </div>
-
-                    {/* Paddy Dimensions / Area */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Field Shape
-                      </label>
-                      <select
-                        value={paddyShapeType}
-                        onChange={(e) => {
-                          setPaddyShapeType(e.target.value as 'rectangle' | 'trapezoid');
-                          setErrors(prev => ({ ...prev, area: "" }));
-                        }}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 mb-3"
-                      >
-                        <option value="rectangle">Rectangle</option>
-                        <option value="trapezoid">Trapezoid (varying width)</option>
-                      </select>
-                      <p className="text-xs text-gray-500 mb-4">
-                        {paddyShapeType === 'rectangle' 
-                          ? 'For rectangular paddies with uniform width'
-                          : 'For paddies where one end is wider than the other'}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">
-                        Paddy Dimensions (for area)
-                      </label>
-                      <div className="grid grid-cols-2 gap-3 mb-3">
-                        <div>
-                          <label className="block text-xs text-gray-600 mb-1">Length (m)</label>
-                          <input
-                            type="number"
-                            value={paddyLength}
-                            onChange={(e) => {
-                              setPaddyLength(e.target.value);
-                              setErrors(prev => ({ ...prev, area: "" }));
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900"
-                            placeholder="e.g., 50"
-                            step="0.1"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-600 mb-1">
-                            {paddyShapeType === 'rectangle' ? 'Width (m)' : 'Width 1 (m)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={paddyWidth}
-                            onChange={(e) => {
-                              setPaddyWidth(e.target.value);
-                              setErrors(prev => ({ ...prev, area: "" }));
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900"
-                            placeholder="e.g., 40"
-                            step="0.1"
-                          />
-                        </div>
-                      </div>
-                      {paddyShapeType === 'trapezoid' && (
-                        <div className="mb-3">
-                          <label className="block text-xs text-gray-600 mb-1">Width 2 (m)</label>
-                          <input
-                            type="number"
-                            value={paddyWidth2}
-                            onChange={(e) => {
-                              setPaddyWidth2(e.target.value);
-                              setErrors(prev => ({ ...prev, area: "" }));
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900"
-                            placeholder="e.g., 45"
-                            step="0.1"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">Width at the other end of the paddy</p>
-                        </div>
-                      )}
-
-                      {errors.area && (
-                        <p className="text-red-500 text-sm mt-1.5 flex items-center gap-1">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          {errors.area}
-                        </p>
-                      )}
-
-                      {calculatePaddyArea() && (
-                        <div className="mt-3 space-y-1.5 p-3 bg-green-50 rounded-lg border border-green-200">
-                          <p className="text-sm text-green-700 font-medium">
-                            📐 Area: {calculatePaddyArea()?.toFixed(2)} m²
-                          </p>
-                          <p className="text-sm text-emerald-700 font-medium">
-                            🌾 Hectares: {((calculatePaddyArea() || 0) / 10000).toFixed(4)} ha
-                          </p>
-                        </div>
-                      )}
-                      <p className="text-xs text-gray-500 mt-2">
-                        Enter the dimensions of this paddy to store its area for fertilizer and yield calculations.
-                      </p>
-                    </div>
-
-                    <div className="flex gap-3 pt-4">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsAddDeviceModalOpen(false);
-                          setErrors({});
-                          setPaddyName("");
-                          setPaddyDescription("");
-                          setDeviceId("");
-                          setPaddyShapeType('rectangle');
-                          setPaddyLength("");
-                          setPaddyWidth("");
-                          setPaddyWidth2("");
-                        }}
-                        className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-semibold"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isVerifying}
-                        className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all font-bold shadow-lg hover:shadow-xl disabled:bg-gray-400 disabled:cursor-not-allowed disabled:active:scale-100"
-                      >
-                        {isVerifying ? 'Adding...' : 'Add Paddy'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-        
         {/* Map Modal */}
-        {showMapModal && (
-          <>
-            {/* Glassmorphism Overlay */}
-            <div 
-              onClick={() => setShowMapModal(false)}
-              className="fixed inset-0 backdrop-blur-sm bg-black/20 z-40 transition-all"
-            />
-            
-            {/* Map Modal */}
-            <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up">
-              <div className="bg-white rounded-t-3xl shadow-2xl h-[80vh] flex flex-col border-t-4 border-green-500">
-                {/* Handle Bar */}
-                <div className="flex justify-center pt-3 pb-4">
-                  <div className="w-12 h-1.5 bg-green-300 rounded-full" />
-                </div>
-                
-                {/* Modal Header */}
-                <div className="px-6 pb-4 border-b border-gray-200">
-                  <h2 className="text-2xl font-bold text-gray-900">{selectedPaddy?.paddyName}</h2>
-                  <p className="text-sm text-gray-600 mt-1">Device: {selectedPaddy?.deviceId}</p>
-                </div>
-                
-                {/* Map Content */}
-                <div className="flex-1 relative">
-                  {loadingLocation ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-4"></div>
-                      <p className="text-gray-600">Fetching location...</p>
-                    </div>
-                  ) : locationData ? (
-                    <div className="absolute inset-0">
-                      {/* Map Container */}
-                      <iframe
-                        width="100%"
-                        height="100%"
-                        frameBorder="0"
-                        style={{ border: 0 }}
-                        src={`https://www.google.com/maps?q=${locationData.lat},${locationData.lng}&output=embed`}
-                        allowFullScreen
-                      />
-                      
-                      {/* Last Location Info Overlay */}
-                      <div className="absolute top-4 left-4 right-4 bg-white rounded-lg shadow-lg p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-2">
-                            <svg className="w-5 h-5 text-green-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            <div>
-                              <p className="text-sm font-medium text-gray-900">Last location</p>
-                              <p className="text-xs text-gray-600 mt-0.5">{getTimeAgo(locationData.timestamp)}</p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setShowMapModal(false)}
-                            className="text-gray-400 hover:text-gray-600 transition-colors"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
-                      <div className="max-w-sm w-full bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex items-start gap-3">
-                            <svg className="w-6 h-6 text-yellow-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            <div>
-                              <p className="font-medium text-gray-900">
-                                {otherDevicesHaveLocation ? "This device doesn't have a location" : "Location isn't initialized"}
-                              </p>
-                              <p className="text-sm text-gray-600 mt-1">
-                                GPS coordinates have not been received from this device yet.
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setShowMapModal(false)}
-                            className="text-gray-400 hover:text-gray-600 transition-colors ml-2"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Close Button */}
-                <div className="px-6 py-4 border-t border-gray-200">
-                  <button
-                    onClick={() => setShowMapModal(false)}
-                    className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-
+        <LocationMapModal
+          isOpen={showMapModal}
+          onClose={() => setShowMapModal(false)}
+          selectedPaddy={selectedPaddy}
+          loadingLocation={loadingLocation}
+          locationData={locationData}
+          otherDevicesHaveLocation={otherDevicesHaveLocation}
+        />
       </div>
     </ProtectedRoute>
   );

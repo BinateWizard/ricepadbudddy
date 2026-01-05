@@ -113,5 +113,18 @@ service cloud.firestore {
       allow update: if request.auth != null;
       allow delete: if isAdmin();
     }
+    
+    // Actions collection - users can read/write their own actions
+    match /actions/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      
+      // Subcollection: userActions under actions
+      match /userActions/{actionId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create: if request.auth != null && request.auth.uid == userId;
+        allow update: if request.auth != null && request.auth.uid == userId;
+        allow delete: if isAdmin();
+      }
+    }
   }
 }

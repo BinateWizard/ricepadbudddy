@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 import { onDeviceValue } from '@/lib/utils/rtdbHelper';
 import { TrendsChart } from './TrendsChart';
+import { getVarietyByName } from '@/lib/utils/varietyHelpers';
 
 // Helper function to check device status
 function getDeviceStatus(paddy: any, deviceReadings: any[]) {
@@ -489,154 +490,175 @@ export function StatisticsTab({ paddies, deviceReadings, fieldId, setDeviceReadi
   // Simple field-level NPK goal based on summed paddy areas (if available)
   const [fieldNPKGoal, setFieldNPKGoal] = useState<{
     n: string; p: string; k: string;
+    nValue: number; pValue: number; kValue: number; // Store numeric values
   } | null>(null);
 
   useEffect(() => {
-    // Only approximate using paddies that have areaHa metadata
-    const totalAreaHa = paddies
-      .map(p => p.areaHectares as number | undefined)
-      .filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > 0)
-      .reduce((sum, v) => sum + v, 0);
+    console.log('[NPK Goal] Calculating field NPK goals...');
+    console.log('[NPK Goal] Paddies:', paddies.length);
+    
+    const fetchFieldVarietyAndCalculate = async () => {
+      if (!user || !fieldId || !paddies.length) {
+        console.log('[NPK Goal] Missing user, fieldId, or paddies');
+        setFieldNPKGoal(null);
+        return;
+      }
 
-    if (!totalAreaHa || !paddies.length) {
-      setFieldNPKGoal(null);
-      return;
-    }
+      try {
+        // Fetch field document to get rice variety
+        const fieldRef = doc(db, 'users', user.uid, 'fields', fieldId);
+        const fieldSnap = await getDoc(fieldRef);
+        
+        if (!fieldSnap.exists()) {
+          console.log('[NPK Goal] Field document not found');
+          setFieldNPKGoal(null);
+          return;
+        }
 
-    // Use the first paddy's variety metadata from deviceReadings if present
-    const firstReadingWithVariety = deviceReadings.find(r => r.varietyNpkPerHa);
-    const varietyNpk = firstReadingWithVariety?.varietyNpkPerHa as any | undefined;
+        const fieldData = fieldSnap.data();
+        const varietyName = fieldData.riceVariety || fieldData.varietyName;
+        
+        if (!varietyName) {
+          console.log('[NPK Goal] No variety name in field');
+          setFieldNPKGoal(null);
+          return;
+        }
 
-    if (!varietyNpk) {
-      setFieldNPKGoal(null);
-      return;
-    }
+        const variety = getVarietyByName(varietyName);
+        if (!variety) {
+          console.log('[NPK Goal] Variety not found:', varietyName);
+          setFieldNPKGoal(null);
+          return;
+        }
 
-    const { N, P2O5, K2O } = varietyNpk;
-    const area = totalAreaHa;
+        console.log('[NPK Goal] Found variety:', variety.name);
 
-    const nMid = ((N.min + N.max) / 2) * area;
-    const pMid = ((P2O5.min + P2O5.max) / 2) * area;
-    const kMid = ((K2O.min + K2O.max) / 2) * area;
+        // Calculate total area from all paddies
+        const totalAreaHa = paddies
+          .map(p => {
+            // Check multiple possible area sources
+            if (typeof p.boundary?.area === 'number') {
+              return p.boundary.area / 10000; // Convert m² to hectares
+            } else if (typeof p.areaHectares === 'number') {
+              return p.areaHectares;
+            } else if (typeof p.areaM2 === 'number') {
+              return p.areaM2 / 10000;
+            }
+            return 0;
+          })
+          .reduce((sum, area) => sum + area, 0);
 
-    setFieldNPKGoal({
-      n: `${nMid.toFixed(1)} kg N`,
-      p: `${pMid.toFixed(1)} kg P₂O₅`,
-      k: `${kMid.toFixed(1)} kg K₂O`,
-    });
-  }, [paddies, deviceReadings]);
+        console.log('[NPK Goal] Total area (ha):', totalAreaHa);
+
+        if (totalAreaHa <= 0) {
+          console.log('[NPK Goal] No area data available');
+          setFieldNPKGoal(null);
+          return;
+        }
+
+        const { N, P2O5, K2O } = variety.npkPerHa;
+        const area = totalAreaHa;
+
+        const nMid = ((N.min + N.max) / 2) * area;
+        const pMid = ((P2O5.min + P2O5.max) / 2) * area;
+        const kMid = ((K2O.min + K2O.max) / 2) * area;
+
+        console.log('[NPK Goal] Calculated:', { nMid, pMid, kMid });
+
+        setFieldNPKGoal({
+          n: `${nMid.toFixed(1)} kg N`,
+          p: `${pMid.toFixed(1)} kg P₂O₅`,
+          k: `${kMid.toFixed(1)} kg K₂O`,
+          nValue: nMid,
+          pValue: pMid,
+          kValue: kMid,
+        });
+      } catch (error) {
+        console.error('[NPK Goal] Error:', error);
+        setFieldNPKGoal(null);
+      }
+    };
+
+    fetchFieldVarietyAndCalculate();
+  }, [paddies, user?.uid, fieldId]);
 
   return (
     <div className="space-y-4 -mx-1 sm:mx-0">
-      {/* Field NPK Goal Summary */}
-      {fieldNPKGoal && (
-        <div className="mx-1 sm:mx-0 mb-1 p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200">
-          <h3 className="text-sm font-semibold text-emerald-900 mb-2">Field NPK Goal (All Paddies)</h3>
-          <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
-            <div className="rounded-lg bg-white/80 px-2 py-1.5 border border-emerald-100">
-              <p className="font-semibold text-emerald-900">N</p>
-              <p className="text-emerald-800">{fieldNPKGoal.n}</p>
-            </div>
-            <div className="rounded-lg bg-white/80 px-2 py-1.5 border border-emerald-100">
-              <p className="font-semibold text-emerald-900">P₂O₅</p>
-              <p className="text-emerald-800">{fieldNPKGoal.p}</p>
-            </div>
-            <div className="rounded-lg bg-white/80 px-2 py-1.5 border border-emerald-100">
-              <p className="font-semibold text-emerald-900">K₂O</p>
-              <p className="text-emerald-800">{fieldNPKGoal.k}</p>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-emerald-800">
-            Total fertilizer target for this field, based on mapped paddy areas and variety recommendations.
-          </p>
-        </div>
-      )}
-
-      {/* Debug Info - Show current device readings */}
-      {deviceReadings.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4">
-          <div className="flex items-start gap-2">
-            <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-blue-900 mb-1">Current Device Status</h3>
-              <p className="text-xs text-blue-700 mb-2">
-                Found {deviceReadings.length} device(s) connected. 
-                {deviceReadings.filter(r => r.npk && (r.npk.n !== undefined || r.npk.p !== undefined || r.npk.k !== undefined)).length > 0
-                  ? ` ${deviceReadings.filter(r => r.npk && (r.npk.n !== undefined || r.npk.p !== undefined || r.npk.k !== undefined)).length} device(s) have NPK data.`
-                  : ' No devices have NPK data yet.'}
-              </p>
-              <details className="text-xs">
-                <summary className="cursor-pointer text-blue-600 hover:text-blue-800">View device data (debug)</summary>
-                <pre className="mt-2 p-2 bg-white rounded text-xs overflow-auto max-h-40">
-                  {JSON.stringify(deviceReadings.map(r => ({
-                    deviceId: r.deviceId,
-                    status: r.status,
-                    npk: r.npk,
-                    connectedAt: r.connectedAt
-                  })), null, 2)}
-                </pre>
-              </details>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Average Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Nitrogen Card */}
-        <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold text-gray-700">Nitrogen (N)</h3>
-            <span className="text-xl">🧪</span>
+        <div className="bg-blue-50 rounded-xl p-4 shadow-md">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-blue-900 text-sm">Nitrogen (N)</h4>
+            <span className="text-2xl">🧪</span>
           </div>
-          <p className="text-xs text-gray-500 font-semibold mb-1">Field Avg</p>
-          <p className="text-xl font-bold text-gray-900">
-            {fieldStats && fieldStats.nitrogen.average !== null && fieldStats.nitrogen.average !== undefined
-              ? Math.round(fieldStats.nitrogen.average)
-              : '--'}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-          {fieldStats && fieldStats.nitrogen.current !== null && fieldStats.nitrogen.current !== undefined && (
-            <p className="text-xs text-gray-400 mt-1">Latest: {Math.round(fieldStats.nitrogen.current)}</p>
-          )}
+          <div className="space-y-2">
+            <div className="text-center">
+              <span className="font-bold text-blue-900 text-2xl">
+                {fieldStats && fieldStats.nitrogen.average !== null && fieldStats.nitrogen.average !== undefined
+                  ? Math.round(fieldStats.nitrogen.average)
+                  : '0'}
+              </span>
+              <span className="text-blue-700 text-xl font-medium"> / </span>
+              <span className="font-bold text-blue-900 text-2xl">
+                {fieldNPKGoal ? fieldNPKGoal.nValue.toFixed(1) : '0'}
+              </span>
+            </div>
+            <div className="text-center text-xs text-blue-700">mg/kg / kg N</div>
+            <div className="text-[10px] text-blue-600 mt-2 text-center">
+              {deviceReadings.filter(r => r.npk?.n !== undefined).length}/{paddies.length} readings
+            </div>
+          </div>
         </div>
 
         {/* Phosphorus Card */}
-        <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold text-gray-700">Phosphorus (P)</h3>
-            <span className="text-xl">⚗️</span>
+        <div className="bg-purple-50 rounded-xl p-4 shadow-md">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-purple-900 text-sm">Phosphorus (P)</h4>
+            <span className="text-2xl">⚗️</span>
           </div>
-          <p className="text-xs text-gray-500 font-semibold mb-1">Field Avg</p>
-          <p className="text-xl font-bold text-gray-900">
-            {fieldStats && fieldStats.phosphorus.average !== null && fieldStats.phosphorus.average !== undefined
-              ? Math.round(fieldStats.phosphorus.average)
-              : '--'}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-          {fieldStats && fieldStats.phosphorus.current !== null && fieldStats.phosphorus.current !== undefined && (
-            <p className="text-xs text-gray-400 mt-1">Latest: {Math.round(fieldStats.phosphorus.current)}</p>
-          )}
+          <div className="space-y-2">
+            <div className="text-center">
+              <span className="font-bold text-purple-900 text-2xl">
+                {fieldStats && fieldStats.phosphorus.average !== null && fieldStats.phosphorus.average !== undefined
+                  ? Math.round(fieldStats.phosphorus.average)
+                  : '0'}
+              </span>
+              <span className="text-purple-700 text-xl font-medium"> / </span>
+              <span className="font-bold text-purple-900 text-2xl">
+                {fieldNPKGoal ? fieldNPKGoal.pValue.toFixed(1) : '0'}
+              </span>
+            </div>
+            <div className="text-center text-xs text-purple-700">mg/kg / kg P₂O₅</div>
+            <div className="text-[10px] text-purple-600 mt-2 text-center">
+              {deviceReadings.filter(r => r.npk?.p !== undefined).length}/{paddies.length} readings
+            </div>
+          </div>
         </div>
 
         {/* Potassium Card */}
-        <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold text-gray-700">Potassium (K)</h3>
-            <span className="text-xl">🔬</span>
+        <div className="bg-orange-50 rounded-xl p-4 shadow-md">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-orange-900 text-sm">Potassium (K)</h4>
+            <span className="text-2xl">🔬</span>
           </div>
-          <p className="text-xs text-gray-500 font-semibold mb-1">Field Avg</p>
-          <p className="text-xl font-bold text-gray-900">
-            {fieldStats && fieldStats.potassium.average !== null && fieldStats.potassium.average !== undefined
-              ? Math.round(fieldStats.potassium.average)
-              : '--'}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-          {fieldStats && fieldStats.potassium.current !== null && fieldStats.potassium.current !== undefined && (
-            <p className="text-xs text-gray-400 mt-1">Latest: {Math.round(fieldStats.potassium.current)}</p>
-          )}
+          <div className="space-y-2">
+            <div className="text-center">
+              <span className="font-bold text-orange-900 text-2xl">
+                {fieldStats && fieldStats.potassium.average !== null && fieldStats.potassium.average !== undefined
+                  ? Math.round(fieldStats.potassium.average)
+                  : '0'}
+              </span>
+              <span className="text-orange-700 text-xl font-medium"> / </span>
+              <span className="font-bold text-orange-900 text-2xl">
+                {fieldNPKGoal ? fieldNPKGoal.kValue.toFixed(1) : '0'}
+              </span>
+            </div>
+            <div className="text-center text-xs text-orange-700">mg/kg / kg K₂O</div>
+            <div className="text-[10px] text-orange-600 mt-2 text-center">
+              {deviceReadings.filter(r => r.npk?.k !== undefined).length}/{paddies.length} readings
+            </div>
+          </div>
         </div>
 
         {/* Temperature Card */}

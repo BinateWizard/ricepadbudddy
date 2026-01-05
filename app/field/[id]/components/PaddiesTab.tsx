@@ -167,27 +167,6 @@ export function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onVi
                   </div>
                   <div className="flex items-center gap-2 ml-4">
                     <button
-                      onClick={(e) => handleScanDevice(e, paddy)}
-                      disabled={scanningDevices.has(paddy.deviceId)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        scanningDevices.has(paddy.deviceId)
-                          ? 'bg-blue-100 cursor-not-allowed'
-                          : 'hover:bg-blue-50'
-                      }`}
-                      title="Scan device sensors"
-                    >
-                      {scanningDevices.has(paddy.deviceId) ? (
-                        <svg className="w-5 h-5 text-blue-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5a4 4 0 100-8 4 4 0 000 8z" />
-                        </svg>
-                      )}
-                    </button>
-                    <button
                       onClick={(e) => onViewLocation(paddy, e)}
                       className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                       title="View location on map"

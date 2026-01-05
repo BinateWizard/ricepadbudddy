@@ -43,7 +43,13 @@ export {
 // 8️⃣ Notification Dispatcher
 export * from './notificationDispatcher';
 
-// 8️⃣ Legacy functions (for backward compatibility)
+// 9️⃣ User Action Logger (includes sendTestNotification)
+export * from './userActionLogger';
+
+// 🔟 Device Action Logger (device-specific logs)
+export * from './deviceActionLogger';
+
+// Legacy functions (for backward compatibility)
 export * from './scheduledCommands';
 // Export commandLogger without logSystemEvent to avoid conflict
 export {

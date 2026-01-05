@@ -1,6 +1,6 @@
-const CACHE_NAME = 'padbuddy-v3';
-const STATIC_CACHE = 'padbuddy-static-v3';
-const DYNAMIC_CACHE = 'padbuddy-dynamic-v3';
+const CACHE_NAME = 'padbuddy-v4';
+const STATIC_CACHE = 'padbuddy-static-v4';
+const DYNAMIC_CACHE = 'padbuddy-dynamic-v4';
 
 // Static assets to cache immediately on install
 const STATIC_ASSETS = [

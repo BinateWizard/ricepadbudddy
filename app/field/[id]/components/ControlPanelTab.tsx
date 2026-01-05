@@ -6,8 +6,10 @@ import { getDeviceStatus, getDeviceGPS, getDeviceNPK } from '@/lib/utils/deviceS
 import { database, db } from '@/lib/firebase';
 import { ref as dbRef, onValue, off, get, push, set } from 'firebase/database';
 import { onDeviceValue } from '@/lib/utils/rtdbHelper';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, query, orderBy, onSnapshot, limit as firestoreLimit } from 'firebase/firestore';
 import { sendDeviceCommand } from '@/lib/utils/deviceCommands';
+import { logUserAction } from '@/lib/utils/userActions';
+import { logDeviceAction, getFieldLogs } from '@/lib/utils/deviceLogs';
 
 // High-level tabs for the control panel.
 // Desktop keeps the full set; on mobile they wrap into 2 rows
@@ -106,16 +108,16 @@ function formatTimeAgo(ts: number | undefined) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-// Log control panel action to Firestore (replaces RTDB logging)
+// Log control panel action via Cloud Function
 async function logControlAction(entry: { deviceId?: string; action: string; details?: any }) {
   try {
-    const logsRef = collection(db, 'control_panel_logs');
-    await addDoc(logsRef, {
-      timestamp: Timestamp.now(),
-      ...entry
+    await logUserAction({
+      deviceId: entry.deviceId,
+      action: entry.action,
+      details: entry.details
     });
   } catch (e) {
-    console.error('Failed to log control action to Firestore', e);
+    console.error('Failed to log control action', e);
   }
 }
 
@@ -273,9 +275,20 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
     try {
       const result = await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay }, user.uid);
       
+      // Log the action via Cloud Function
+      await logDeviceAction({
+        deviceId,
+        fieldId: fieldId || '',
+        nodeId: 'ESP32A',
+        action: `Relay ${relay} ${action.toUpperCase()}`,
+        actionType: 'relay',
+        params: { relay, action },
+        result: result.success ? 'success' : 'failed',
+        details: result
+      });
+      
       if (result.success) {
         console.log(`[Relay] Command ${action} sent successfully`, result);
-        // Optionally show success message
         if (result.status === 'completed') {
           console.log(`✓ Relay ${relay} turned ${action}`);
         }
@@ -285,6 +298,17 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
       }
     } catch (e) {
       console.error('Failed to send relay command', e);
+      // Log the error
+      await logDeviceAction({
+        deviceId,
+        fieldId: fieldId || '',
+        nodeId: 'ESP32A',
+        action: `Relay ${relay} ${action.toUpperCase()} - Failed`,
+        actionType: 'relay',
+        params: { relay, action },
+        result: 'failed',
+        error: String(e)
+      });
       alert('Failed to send relay command');
     } finally {
       setSendingRelay(null);
@@ -394,35 +418,42 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* High-level action runner (works for relays, motors, GPS, NPK) */}
+                  {/* Field Controls */}
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <div className="text-base font-bold text-gray-900">Device Actions</div>
+                      <div className="text-base font-bold text-gray-900">Field Controls</div>
                       <div className="text-xs text-gray-600 mt-1">Select an action to control your devices</div>
                     </div>
                   </div>
 
                   <div className="space-y-3">
                     {CONTROL_ACTIONS.map((action) => (
-                      <button
+                      <div
                         key={action.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedActionId(action.id);
-                          setIsActionModalOpen(true);
-                        }}
-                        className="w-full rounded-2xl border-2 border-emerald-100 bg-white px-5 py-4 text-left shadow-sm hover:border-emerald-400 hover:shadow-lg hover:bg-emerald-50/50 active:scale-[0.98] transition-all duration-200 min-h-[64px]"
-                        aria-label={`Run ${action.label}`}
+                        className="w-full rounded-2xl border-2 border-emerald-100 bg-white px-5 py-4 shadow-sm hover:border-emerald-400 hover:shadow-lg transition-all duration-200 min-h-[64px] flex items-center justify-between gap-4"
                       >
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="text-sm font-bold text-emerald-700 mb-1">{action.label}</div>
-                            <div className="text-xs text-gray-600 line-clamp-2">{action.description}</div>
-                          </div>
-                          <span className="text-2xl leading-none text-emerald-400 font-light">›</span>
+                        <div className="flex-1">
+                          <div className="text-sm font-bold text-emerald-700 mb-1">{action.label}</div>
+                          <div className="text-xs text-gray-600 line-clamp-2">{action.description}</div>
                         </div>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedActionId(action.id);
+                            setIsActionModalOpen(true);
+                          }}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg active:scale-95 transition-all duration-200 whitespace-nowrap"
+                          aria-label={`Run ${action.label}`}
+                        >
+                          Run
+                        </button>
+                      </div>
                     ))}
+                  </div>
+
+                  {/* Device Logs Section */}
+                  <div className="mt-8 pt-6 border-t-2 border-gray-200">
+                    <DeviceLogsSection fieldId={fieldId || ''} />
                   </div>
                 </div>
               )
@@ -727,7 +758,7 @@ function ActionRunnerModal({ actionId, onClose, devices, userId }: ActionRunnerM
 
       {/* Bottom sheet container, matching Add Paddy modal structure */}
       <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up">
-        <div className="bg-white rounded-t-3xl shadow-2xl h-[70vh] flex flex-col border-t-4 border-green-500">
+        <div className="bg-white rounded-t-3xl shadow-2xl h-[85vh] flex flex-col border-t-4 border-green-500">
           {/* Handle bar */}
           <div className="flex justify-center pt-3 pb-3">
             <div className="w-12 h-1.5 bg-green-300 rounded-full" />
@@ -750,112 +781,112 @@ function ActionRunnerModal({ actionId, onClose, devices, userId }: ActionRunnerM
 
           {/* Modal body */}
           <div className="flex-1 overflow-y-auto px-5 pb-4 space-y-3">
-          {action.requiresRelay && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-semibold text-black">Relay:</span>
-              <select
-                className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white"
-                value={relayNumber}
-                onChange={(e) => setRelayNumber(Number(e.target.value) || 1)}
-              >
-                {[1, 2, 3, 4].map((n) => (
-                  <option key={n} value={n}>{`Relay ${n}`}</option>
-                ))}
-              </select>
+            {action.requiresRelay && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-semibold text-black">Relay:</span>
+                <select
+                  className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white"
+                  value={relayNumber}
+                  onChange={(e) => setRelayNumber(Number(e.target.value) || 1)}
+                >
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={n}>{`Relay ${n}`}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="w-10 px-2 py-2 text-left">
+                      <input
+                        type="checkbox"
+                        className="w-3 h-3"
+                        checked={anySelected && devices.every((d) => selected[d.id])}
+                        onChange={(e) => {
+                          const next: Record<string, boolean> = {};
+                          devices.forEach((d) => {
+                            next[d.id] = e.target.checked;
+                          });
+                          setSelected(next);
+                        }}
+                      />
+                    </th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-700">Device</th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-700">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {devices.map((d) => {
+                    const row = results[d.id];
+                    return (
+                      <tr key={d.id} className="border-b border-gray-100 last:border-b-0">
+                        <td className="px-2 py-1.5 align-top">
+                          <input
+                            type="checkbox"
+                            className="w-3 h-3 mt-0.5"
+                            checked={!!selected[d.id]}
+                            onChange={() => handleToggleDevice(d.id)}
+                          />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <div className="text-xs font-semibold text-black">{d.label}</div>
+                          <div className="text-[11px] text-gray-500 font-mono break-all">{d.id}</div>
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          {!row && <span className="text-[11px] text-gray-400">Waiting…</span>}
+                          {row && row.status === 'running' && (
+                            <span className="text-[11px] text-blue-600 flex items-center gap-1">
+                              <span className="inline-block w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                              Running…
+                            </span>
+                          )}
+                          {row && row.status === 'success' && (
+                            <span className="text-[11px] text-green-700">{row.message}</span>
+                          )}
+                          {row && row.status === 'error' && (
+                            <span className="text-[11px] text-red-600">{row.message}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
 
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <table className="min-w-full text-xs">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="w-10 px-2 py-2 text-left">
-                    <input
-                      type="checkbox"
-                      className="w-3 h-3"
-                      checked={anySelected && devices.every((d) => selected[d.id])}
-                      onChange={(e) => {
-                        const next: Record<string, boolean> = {};
-                        devices.forEach((d) => {
-                          next[d.id] = e.target.checked;
-                        });
-                        setSelected(next);
-                      }}
-                    />
-                  </th>
-                  <th className="px-2 py-2 text-left font-semibold text-gray-700">Device</th>
-                  <th className="px-2 py-2 text-left font-semibold text-gray-700">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {devices.map((d) => {
-                  const row = results[d.id];
-                  return (
-                    <tr key={d.id} className="border-b border-gray-100 last:border-b-0">
-                      <td className="px-2 py-1.5 align-top">
-                        <input
-                          type="checkbox"
-                          className="w-3 h-3 mt-0.5"
-                          checked={!!selected[d.id]}
-                          onChange={() => handleToggleDevice(d.id)}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5 align-top">
-                        <div className="text-xs font-semibold text-black">{d.label}</div>
-                        <div className="text-[11px] text-gray-500 font-mono break-all">{d.id}</div>
-                      </td>
-                      <td className="px-2 py-1.5 align-top">
-                        {!row && <span className="text-[11px] text-gray-400">Waiting…</span>}
-                        {row && row.status === 'running' && (
-                          <span className="text-[11px] text-blue-600 flex items-center gap-1">
-                            <span className="inline-block w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                            Running…
-                          </span>
-                        )}
-                        {row && row.status === 'success' && (
-                          <span className="text-[11px] text-green-700">{row.message}</span>
-                        )}
-                        {row && row.status === 'error' && (
-                          <span className="text-[11px] text-red-600">{row.message}</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
-          <div className="text-[11px] text-gray-600">
-            {anySelected ? `${devices.filter((d) => selected[d.id]).length} device(s) selected` : 'No devices selected'}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleRun}
-              disabled={!anySelected || isRunning}
-              className={`px-3 py-1.5 text-xs rounded-md font-semibold text-white flex items-center gap-1 ${
-                !anySelected || isRunning
-                  ? 'bg-emerald-300 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-700'
-              }`}
-            >
-              {isRunning && (
-                <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-              <span>{isRunning ? 'Running…' : 'Run command'}</span>
-            </button>
+          {/* Footer */}
+          <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+            <div className="text-[11px] text-gray-600">
+              {anySelected ? `${devices.filter((d) => selected[d.id]).length} device(s) selected` : 'No devices selected'}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3 py-1.5 text-xs rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRun}
+                disabled={!anySelected || isRunning}
+                className={`px-3 py-1.5 text-xs rounded-md font-semibold text-white flex items-center gap-1 ${
+                  !anySelected || isRunning
+                    ? 'bg-emerald-300 cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {isRunning && (
+                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                <span>{isRunning ? 'Running…' : 'Run command'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -913,7 +944,9 @@ function LocationControls({ devices }: { devices: Array<{ id: string; label?: st
     });
   };
 
-  // helper: push a log entry to Firestore
+  const { user } = useAuth();
+
+  // helper: push a log entry via Cloud Function
   const logAction = async (entry: { deviceId?: string; action: string; details?: any }) => {
     await logControlAction(entry);
   };
@@ -942,7 +975,6 @@ function LocationControls({ devices }: { devices: Array<{ id: string; label?: st
 
   const requestLocationFor = async (id: string) => {
     try {
-      const { user } = useAuth();
       // Send GPS request to ESP32B (motor controller has GPS)
       const res = await sendDeviceCommand(id, 'ESP32B', 'motor', 'get_location', {}, user?.uid || '');
 
@@ -1022,28 +1054,42 @@ function LocationControls({ devices }: { devices: Array<{ id: string; label?: st
   );
 }
 
-// LogsControls — reads from Firestore `/control_panel_logs` collection and paginates entries (10 per page)
+// LogsControls — reads from Firestore actions/{userId}/userActions collection and paginates entries (10 per page)
 // Expected Firestore shape:
-// control_panel_logs/{docId} = { timestamp: Timestamp, deviceId?: string, action: string, details?: any }
+// actions/{userId}/userActions/{docId} = { timestamp: Timestamp, deviceId?: string, action: string, details?: any }
 function LogsControls() {
+  const { user } = useAuth();
   const [entries, setEntries] = useState<Array<any>>([]);
   const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
   const perPage = 10;
 
   useEffect(() => {
-    // For now, read RTDB logs (migration to Firestore can be done later)
-    // This keeps the existing behavior while new actions log to Firestore
-    const logsRef = dbRef(database, 'control_panel_logs');
-    const unsub = onValue(logsRef, (snap) => {
-      const val = snap.exists() ? snap.val() : {};
-      const arr = Object.entries(val).map(([k, v]: any) => ({ id: k, ...(v as any) }));
-      arr.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    if (!user?.uid) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+
+    // Read from Firestore actions/{userId}/userActions collection
+    const actionsRef = collection(db, 'actions', user.uid, 'userActions');
+    const q = query(actionsRef, orderBy('timestamp', 'desc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const arr = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toMillis() || Date.now()
+      }));
       setEntries(arr);
-      setPage(0);
+      setLoading(false);
+      if (page >= Math.ceil(arr.length / perPage)) {
+        setPage(0);
+      }
     });
 
-    return () => unsub && unsub();
-  }, []);
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
   const visible = entries.slice(page * perPage, page * perPage + perPage);
@@ -1055,6 +1101,10 @@ function LogsControls() {
         <div className="text-sm text-gray-600">Total: {entries.length}</div>
       </div>
 
+      {loading ? (
+        <div className="text-center py-8 text-gray-600">Loading logs...</div>
+      ) : (
+        <>
       <div className="space-y-3">
         {visible.length === 0 && <div className="text-black">No history available.</div>}
         {visible.map((e) => (
@@ -1074,6 +1124,126 @@ function LogsControls() {
           <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="py-1 px-2 bg-gray-200 rounded">Next</button>
         </div>
       </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// DeviceLogsSection - Shows recent device actions from Cloud Functions
+function DeviceLogsSection({ fieldId }: { fieldId: string }) {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    const fetchLogs = async () => {
+      setLoading(true);
+      try {
+        const result = await getFieldLogs(fieldId, 50);
+        if (result.success) {
+          setLogs(result.logs || []);
+        }
+      } catch (error) {
+        console.error('Error fetching field logs:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLogs();
+    // Refresh logs every 30 seconds
+    const interval = setInterval(fetchLogs, 30000);
+    return () => clearInterval(interval);
+  }, [fieldId]);
+
+  const displayLogs = showAll ? logs : logs.slice(0, 5);
+
+  const getActionIcon = (actionType: string) => {
+    switch (actionType) {
+      case 'relay': return '⚡';
+      case 'motor': return '🔧';
+      case 'npk': return '🧪';
+      case 'gps': return '📍';
+      default: return '📝';
+    }
+  };
+
+  const getResultColor = (result: string) => {
+    switch (result) {
+      case 'success': return 'text-green-600 bg-green-50 border-green-200';
+      case 'failed': return 'text-red-600 bg-red-50 border-red-200';
+      case 'timeout': return 'text-orange-600 bg-orange-50 border-orange-200';
+      case 'pending': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+      default: return 'text-gray-600 bg-gray-50 border-gray-200';
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-base font-bold text-gray-900">Device Action Logs</h3>
+          <p className="text-xs text-gray-600 mt-1">Recent device control actions</p>
+        </div>
+        {logs.length > 5 && (
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="text-xs font-semibold text-emerald-600 hover:text-emerald-700"
+          >
+            {showAll ? 'Show Less' : `Show All (${logs.length})`}
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+          <p className="text-sm text-gray-600 mt-2">Loading logs...</p>
+        </div>
+      ) : displayLogs.length === 0 ? (
+        <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-gray-200">
+          <p className="text-sm text-gray-600">No device actions yet</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {displayLogs.map((log: any, index: number) => (
+            <div
+              key={log.id || index}
+              className="p-3 rounded-lg bg-white border-2 border-gray-100 hover:border-gray-200 transition-all"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">{getActionIcon(log.actionType)}</span>
+                    <span className="text-sm font-semibold text-gray-900 truncate">{log.action}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getResultColor(log.result)}`}>
+                      {log.result || 'pending'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-600 space-y-0.5">
+                    <div>Device: <span className="font-mono">{log.deviceId}</span></div>
+                    {log.nodeId && <div>Node: <span className="font-semibold">{log.nodeId}</span></div>}
+                    {log.params && Object.keys(log.params).length > 0 && (
+                      <div className="font-mono text-[10px] text-gray-500">
+                        {JSON.stringify(log.params)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="text-[10px] text-gray-500 whitespace-nowrap">
+                  {log.timestamp ? formatTimeAgo(log.timestamp) : 'Unknown'}
+                </div>
+              </div>
+              {log.error && (
+                <div className="mt-2 text-xs text-red-600 bg-red-50 rounded p-2">
+                  Error: {log.error}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

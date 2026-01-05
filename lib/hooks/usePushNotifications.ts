@@ -92,15 +92,23 @@ export function usePushNotifications() {
     if (!user) return;
 
     try {
-      const tokenRef = doc(db, `users/${user.uid}/fcmTokens/${fcmToken}`);
-      await setDoc(tokenRef, {
-        token: fcmToken,
-        createdAt: new Date(),
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-      }, { merge: true });
+      const userRef = doc(db, `users/${user.uid}`);
+      const userDoc = await getDoc(userRef);
       
-      console.log('FCM token saved to Firestore');
+      let existingTokens: string[] = [];
+      if (userDoc.exists()) {
+        existingTokens = userDoc.data()?.fcmTokens || [];
+      }
+      
+      // Add token if not already in array
+      if (!existingTokens.includes(fcmToken)) {
+        existingTokens.push(fcmToken);
+        await setDoc(userRef, {
+          fcmTokens: existingTokens,
+          lastTokenUpdate: new Date(),
+        }, { merge: true });
+        console.log('FCM token saved to Firestore');
+      }
     } catch (error) {
       console.error('Error saving FCM token:', error);
     }

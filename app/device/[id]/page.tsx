@@ -32,6 +32,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Menu, Home as HomeIcon, BookOpen, HelpCircle, Info, LogOut, Shield } from "lucide-react";
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
 import { usePaddyLiveData } from "@/lib/hooks/usePaddyLiveData";
+import { getDeviceLogs } from '@/lib/utils/deviceLogs';
 
 // Admin email for access control
 const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
@@ -84,6 +85,12 @@ export default function DeviceDetail() {
   const [motorProcessing, setMotorProcessing] = useState(false);
   const [mapMode, setMapMode] = useState<'view' | 'edit'>('view');
   const [deviceOnlineStatus, setDeviceOnlineStatus] = useState<{online: boolean; lastChecked: number} | null>(null);
+
+  // Device logs state
+  const [showDeviceLogs, setShowDeviceLogs] = useState(false);
+  const [deviceLogs, setDeviceLogs] = useState<any[]>([]);
+  const [loadingDeviceLogs, setLoadingDeviceLogs] = useState(false);
+  const [logsLimit, setLogsLimit] = useState(10);
 
   // Per-paddy NPK goal (total fertilizer target), derived from field variety and paddy area
   const [npkGoal, setNpkGoal] = useState<{ n: string; p: string; k: string } | null>(null);
@@ -541,17 +548,45 @@ export default function DeviceDetail() {
     try {
       // Send scan command to device via RTDB
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      
       // Assuming ESP32C handles NPK scanning
-      await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, user.uid);
+      const result = await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, user.uid);
       
-      setLastScanTime(new Date());
-      setScanSuccess(true);
-      
-      // Auto-hide success message after 3 seconds
-      setTimeout(() => setScanSuccess(false), 3000);
+      if (result.success) {
+        setLastScanTime(new Date());
+        setScanSuccess(true);
+        
+        // Log successful action
+        await logUserAction({
+          deviceId,
+          action: 'NPK Scan',
+          details: {
+            result: 'success',
+            source: 'device_page'
+          }
+        });
+        
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => setScanSuccess(false), 3000);
+      } else {
+        throw new Error(result.message || 'Scan command failed');
+      }
     } catch (error) {
       console.error('Error scanning device:', error);
       alert('Failed to send scan command to device');
+      
+      // Log error
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      await logUserAction({
+        deviceId,
+        action: 'NPK Scan',
+        details: {
+          result: 'error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          source: 'device_page'
+        }
+      });
     } finally {
       setIsScanning(false);
     }
@@ -743,6 +778,8 @@ export default function DeviceDetail() {
     try {
       // Import the sendDeviceCommand function
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      
       const result = await sendDeviceCommand(
         deviceId,
         'ESP32A', // Relay controller node
@@ -762,11 +799,37 @@ export default function DeviceDetail() {
         const msg = `✓ Relay ${relayNum} turned ${newState ? 'ON' : 'OFF'}`;
         console.log(msg);
         
+        // Log successful action
+        await logUserAction({
+          deviceId,
+          action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+          details: {
+            relayNumber: relayNum,
+            state: newState ? 'ON' : 'OFF',
+            result: 'success',
+            source: 'device_page'
+          }
+        });
+        
         // Optional: Show toast notification instead of alert
         // For now, we'll skip the alert to avoid blocking UI
       } else if (result.status === 'timeout') {
         // Timeout - device may be offline
         alert(`⏱️ Relay ${relayNum} command timeout. Device may be offline or busy. Please check device status.`);
+        
+        // Log timeout
+        const { logUserAction } = await import('@/lib/utils/userActions');
+        await logUserAction({
+          deviceId,
+          action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+          details: {
+            relayNumber: relayNum,
+            state: newState ? 'ON' : 'OFF',
+            result: 'timeout',
+            message: 'Device offline or busy',
+            source: 'device_page'
+          }
+        });
       } else {
         // Other error
         throw new Error(result.message || 'Command failed');
@@ -774,6 +837,20 @@ export default function DeviceDetail() {
     } catch (error) {
       console.error('Error toggling relay:', error);
       alert(`Failed to toggle Relay ${relayNum}. ${error instanceof Error ? error.message : 'Please try again.'}`);
+      
+      // Log error
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      await logUserAction({
+        deviceId,
+        action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+        details: {
+          relayNumber: relayNum,
+          state: newState ? 'ON' : 'OFF',
+          result: 'error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          source: 'device_page'
+        }
+      });
     } finally {
       // Clear processing state
       const newProcessingStates = [...relayProcessing];
@@ -791,6 +868,8 @@ export default function DeviceDetail() {
     setMotorProcessing(true);
     try {
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      
       const result = await sendDeviceCommand(
         deviceId,
         'ESP32B',
@@ -803,14 +882,50 @@ export default function DeviceDetail() {
       if (result.success && result.status === 'completed') {
         setMotorExtended(!motorExtended);
         console.log(`✓ Motor ${motorAction}ed successfully`);
+        
+        // Log successful action
+        await logUserAction({
+          deviceId,
+          action: `Motor ${motorAction}`,
+          details: {
+            motorAction,
+            result: 'success',
+            source: 'device_page'
+          }
+        });
       } else if (result.status === 'timeout') {
         alert(`⏱️ Motor command timeout. Device may be offline.`);
+        
+        // Log timeout
+        await logUserAction({
+          deviceId,
+          action: `Motor ${motorAction}`,
+          details: {
+            motorAction,
+            result: 'timeout',
+            message: 'Device offline',
+            source: 'device_page'
+          }
+        });
       } else {
         throw new Error(result.message || 'Command failed');
       }
     } catch (error) {
       console.error('Error toggling motor:', error);
       alert(`Failed to ${motorAction} motor. ${error instanceof Error ? error.message : 'Please try again.'}`);
+      
+      // Log error
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      await logUserAction({
+        deviceId,
+        action: `Motor ${motorAction}`,
+        details: {
+          motorAction,
+          result: 'error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          source: 'device_page'
+        }
+      });
     } finally {
       setMotorProcessing(false);
     }
@@ -1584,6 +1699,151 @@ export default function DeviceDetail() {
               </div>
             </div>
           </div>
+
+          {/* Control Actions Log */}
+          {user && (
+            <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Control Actions Log</h3>
+                <button
+                  onClick={async () => {
+                    setShowDeviceLogs(!showDeviceLogs);
+                    if (!showDeviceLogs && deviceLogs.length === 0) {
+                      setLoadingDeviceLogs(true);
+                      try {
+                        const result = await getDeviceLogs({ deviceId, limit: logsLimit });
+                        if (result.success && result.logs) {
+                          setDeviceLogs(result.logs);
+                        }
+                      } catch (error) {
+                        console.error('Error loading device logs:', error);
+                      } finally {
+                        setLoadingDeviceLogs(false);
+                      }
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  {showDeviceLogs ? 'Hide Logs' : 'View Logs'}
+                </button>
+              </div>
+              
+              {showDeviceLogs ? (
+                <div className="space-y-4">
+                  {loadingDeviceLogs ? (
+                    <div className="text-center py-8">
+                      <svg className="animate-spin h-8 w-8 text-blue-600 mx-auto" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <p className="text-sm text-gray-600 mt-2">Loading logs...</p>
+                    </div>
+                  ) : deviceLogs.length > 0 ? (
+                    <>
+                      <div className="space-y-3">
+                        {deviceLogs.map((log, index) => (
+                          <div key={log.id || index} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    log.actionType === 'relay' ? 'bg-orange-100 text-orange-800' :
+                                    log.actionType === 'motor' ? 'bg-blue-100 text-blue-800' :
+                                    log.actionType === 'npk' ? 'bg-purple-100 text-purple-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {log.actionType?.toUpperCase() || 'ACTION'}
+                                  </span>
+                                  <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    log.result === 'success' ? 'bg-green-100 text-green-800' :
+                                    log.result === 'failed' ? 'bg-red-100 text-red-800' :
+                                    log.result === 'timeout' ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {log.result?.toUpperCase() || 'PENDING'}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-medium text-gray-900">{log.action}</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {log.nodeId && <span className="font-mono">{log.nodeId}</span>}
+                                  {log.nodeId && log.timestamp && ' • '}
+                                  {log.timestamp && new Date(log.timestamp).toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                        <p className="text-sm text-gray-600">Showing {deviceLogs.length} log{deviceLogs.length !== 1 ? 's' : ''}</p>
+                        <div className="flex gap-2">
+                          {logsLimit === 10 && (
+                            <button
+                              onClick={async () => {
+                                setLogsLimit(50);
+                                setLoadingDeviceLogs(true);
+                                try {
+                                  const result = await getDeviceLogs({ deviceId, limit: 50 });
+                                  if (result.success && result.logs) {
+                                    setDeviceLogs(result.logs);
+                                  }
+                                } catch (error) {
+                                  console.error('Error loading more logs:', error);
+                                } finally {
+                                  setLoadingDeviceLogs(false);
+                                }
+                              }}
+                              className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                            >
+                              Load More (50)
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              setLoadingDeviceLogs(true);
+                              try {
+                                const result = await getDeviceLogs({ deviceId, limit: logsLimit });
+                                if (result.success && result.logs) {
+                                  setDeviceLogs(result.logs);
+                                }
+                              } catch (error) {
+                                console.error('Error refreshing logs:', error);
+                              } finally {
+                                setLoadingDeviceLogs(false);
+                              }
+                            }}
+                            className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors flex items-center gap-1"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Refresh
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-8 bg-gray-50 rounded-lg">
+                      <svg className="w-12 h-12 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <p className="text-sm text-gray-600">No logs found for this device</p>
+                      <p className="text-xs text-gray-500 mt-1">Control actions will appear here</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-600">Click "View Logs" to see device control history</p>
+                  <p className="text-xs text-gray-500 mt-2">Track relay commands, motor actions, and sensor scans</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Danger Zone */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border-0">

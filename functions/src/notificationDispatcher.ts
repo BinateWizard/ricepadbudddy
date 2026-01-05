@@ -5,6 +5,27 @@
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import * as nodemailer from 'nodemailer';
+
+// Email configuration - use environment variables in production
+const EMAIL_USER = functions.config()?.email?.user || process.env.EMAIL_USER || 'noreply@padbuddy.com';
+const EMAIL_PASS = functions.config()?.email?.password || process.env.EMAIL_PASSWORD || '';
+
+// Create reusable transporter
+let transporter: nodemailer.Transporter | null = null;
+
+function getEmailTransporter() {
+  if (!transporter && EMAIL_PASS) {
+    transporter = nodemailer.createTransport({
+      service: 'gmail', // or 'smtp.gmail.com'
+      auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS, // Use App Password for Gmail
+      },
+    });
+  }
+  return transporter;
+}
 
 /**
  * Dispatch Notification
@@ -81,17 +102,32 @@ export const dispatchNotification = functions.firestore
       // Send email notification (optional)
       if (userData?.email && userData?.emailNotifications !== false) {
         try {
-          // TODO: Implement email sending via SendGrid, Firebase Extensions, or similar
-          // For now, just log
-          console.log(`[Dispatch] Email notification would be sent to: ${userData.email}`);
+          const emailTransporter = getEmailTransporter();
           
-          // Example with SendGrid:
-          // await sendGridClient.send({
-          //   to: userData.email,
-          //   from: 'notifications@padbuddy.com',
-          //   subject: getNotificationTitle(notification.type),
-          //   text: notification.message
-          // });
+          if (emailTransporter) {
+            const emailSubject = getNotificationTitle(notification.type);
+            const emailBody = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #16a34a;">${emailSubject}</h2>
+                <p style="font-size: 16px; color: #333;">${notification.message}</p>
+                ${notification.deviceId ? `<p style="color: #666;">Device: ${notification.deviceId}</p>` : ''}
+                ${notification.fieldId ? `<p style="color: #666;">Field ID: ${notification.fieldId}</p>` : ''}
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+                <p style="font-size: 12px; color: #999;">This is an automated notification from PadBuddy. <a href="https://padbuddy.app">Open PadBuddy</a></p>
+              </div>
+            `;
+            
+            await emailTransporter.sendMail({
+              from: `"PadBuddy" <${EMAIL_USER}>`,
+              to: userData.email,
+              subject: emailSubject,
+              html: emailBody,
+            });
+            
+            console.log(`[Dispatch] Email notification sent to: ${userData.email}`);
+          } else {
+            console.log(`[Dispatch] Email transporter not configured, skipping email to: ${userData.email}`);
+          }
         } catch (error: any) {
           console.error(`[Dispatch] Error sending email:`, error.message);
         }
