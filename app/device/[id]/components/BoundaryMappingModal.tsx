@@ -128,13 +128,13 @@ export function BoundaryMappingModal({
       )}
       
       {/* Map Area */}
-      <div className="flex-1 relative overflow-hidden bg-gray-100">
+      <div className="flex-1 relative overflow-hidden">
         {/* Google Maps Iframe */}
         <iframe
           width="100%"
           height="100%"
           frameBorder="0"
-          className="ui-embed-fill"
+          style={{ border: 0 }}
           src={`https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&output=embed&z=18`}
           allowFullScreen
           title="Map View"
@@ -142,7 +142,7 @@ export function BoundaryMappingModal({
         
         {/* Boundary Visualization with SVG */}
         {polygonCoords.length > 0 && (
-          <div className="absolute inset-0 pointer-events-none z-[5]">
+          <div className="absolute inset-0 pointer-events-none z-10">
             <svg className="absolute inset-0 w-full h-full">
               {/* Draw connecting lines */}
               {polygonCoords.length > 1 && (
@@ -246,7 +246,7 @@ export function BoundaryMappingModal({
             
             {/* Area badge overlay */}
             {polygonCoords.length >= 3 && (
-              <div className="absolute top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg font-semibold">
+              <div className="absolute top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-md font-semibold">
                 <p className="text-xs opacity-90">Boundary Area</p>
                 <p className="text-base">{(calculatePolygonArea(polygonCoords) / 10000).toFixed(4)} ha</p>
               </div>
@@ -256,7 +256,7 @@ export function BoundaryMappingModal({
         
         {/* Controls Overlay - Edit Mode */}
         {mapMode === 'edit' && (
-          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-lg p-4 max-w-md z-10">
+          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-md p-4 max-w-md z-20">
             <h3 className="font-semibold text-gray-900 mb-2">Add Boundary Points</h3>
             <p className="text-xs text-gray-600 mb-3">
               Enter GPS coordinates below to add boundary points. You need at least 3 points to create an area.
@@ -344,7 +344,7 @@ export function BoundaryMappingModal({
         
         {/* View Mode Info */}
         {mapMode === 'view' && polygonCoords.length > 0 && (
-          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-lg p-4 z-10">
+          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-md p-4 z-20">
             <h3 className="font-semibold text-gray-900 mb-2">Boundary Info</h3>
             <div className="space-y-1 text-sm">
               <p className="text-gray-700">
@@ -362,7 +362,7 @@ export function BoundaryMappingModal({
         
         {/* No boundary message */}
         {mapMode === 'view' && polygonCoords.length === 0 && (
-          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-lg p-4 z-10">
+          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-md p-4 z-20">
             <p className="text-sm text-gray-700">No boundary saved yet.</p>
             <p className="text-xs text-gray-500 mt-2">
               Switch to Edit mode to add points
