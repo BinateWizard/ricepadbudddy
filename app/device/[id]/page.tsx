@@ -70,7 +70,7 @@ export default function DeviceDetail() {
   // Boundary mapping states
   const [showBoundaryModal, setShowBoundaryModal] = useState(false);
   const [polygonCoords, setPolygonCoords] = useState<{lat: number; lng: number}[]>([]);
-  const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 }); // Default Philippines
+  const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 }); // Default Philippines, will be updated
   const [isSavingBoundary, setIsSavingBoundary] = useState(false);
   const [inputLat, setInputLat] = useState('');
   const [inputLng, setInputLng] = useState('');
@@ -556,13 +556,17 @@ export default function DeviceDetail() {
   
   // Boundary mapping functions
   const handleOpenBoundaryMap = () => {
-    // Try to get device GPS location for map center
+    // Priority 1: Use device GPS location if available
     if (gpsData && gpsData.lat && gpsData.lng) {
       setMapCenter({
         lat: gpsData.lat,
         lng: gpsData.lng
       });
-    } else if (navigator.geolocation) {
+      setShowBoundaryModal(true);
+    } 
+    // Priority 2: Try to get user's browser geolocation
+    else if (navigator.geolocation) {
+      setShowBoundaryModal(true); // Show modal immediately
       navigator.geolocation.getCurrentPosition(
         (position) => {
           setMapCenter({
@@ -572,11 +576,20 @@ export default function DeviceDetail() {
         },
         (error) => {
           console.log('Geolocation error:', error);
+          // Keep default location if geolocation fails
+          alert('Location access denied. Using default map location. Please enable location permissions or enter coordinates manually.');
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0
         }
       );
+    } else {
+      // No geolocation support
+      alert('Geolocation is not supported by your browser. Using default map location. Please enter coordinates manually.');
+      setShowBoundaryModal(true);
     }
-    
-    setShowBoundaryModal(true);
   };
   
   // Add point at crosshair (map center)
