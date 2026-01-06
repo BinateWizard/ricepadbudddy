@@ -11,6 +11,7 @@ import * as admin from "firebase-admin";
 
 export interface UserAction {
   deviceId?: string;
+  fieldId?: string;
   action: string;
   details?: Record<string, any>;
 }
@@ -31,7 +32,7 @@ export const logUserAction = functions.https.onCall(async (data: UserAction, con
   }
 
   const userId = context.auth.uid;
-  const { deviceId, action, details } = data;
+  const { deviceId, fieldId, action, details } = data;
 
   // Validate required fields
   if (!action) {
@@ -43,17 +44,32 @@ export const logUserAction = functions.https.onCall(async (data: UserAction, con
 
   try {
     const firestore = admin.firestore();
+    const timestamp = Date.now();
+    
+    const logEntry = {
+      deviceId: deviceId || null,
+      fieldId: fieldId || null,
+      action,
+      details: details || {},
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: timestamp
+    };
+    
+    // Store in userActions collection (for Control Panel History tab)
     const actionRef = await firestore
       .collection('actions')
       .doc(userId)
       .collection('userActions')
-      .add({
-        deviceId: deviceId || null,
-        action,
-        details: details || {},
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        createdAt: Date.now()
-      });
+      .add(logEntry);
+
+    // Also store in deviceActions if deviceId exists (for Field logs via getFieldLogs)
+    if (deviceId && fieldId) {
+      await firestore
+        .collection('users')
+        .doc(userId)
+        .collection('deviceActions')
+        .add(logEntry);
+    }
 
     console.log(`[User Action Logger] Logged action ${actionRef.id} for user ${userId}`);
 

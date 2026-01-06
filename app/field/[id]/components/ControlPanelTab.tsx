@@ -1073,16 +1073,20 @@ function LogsControls() {
 
     // Read from Firestore actions/{userId}/userActions collection
     const actionsRef = collection(db, 'actions', user.uid, 'userActions');
-    const q = query(actionsRef, orderBy('timestamp', 'desc'));
+    const q = query(actionsRef, orderBy('createdAt', 'desc'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       console.log(`[Logs] Fetched ${snapshot.docs.length} documents from Firestore`);
-      const arr = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toMillis() || Date.now()
-      }));
-      console.log(`[Logs] Processed ${arr.length} entries for display`);
+      const arr = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        console.log(`[Logs] Document ${doc.id}:`, data);
+        return {
+          id: doc.id,
+          ...data,
+          timestamp: data.timestamp?.toMillis() || data.createdAt || Date.now()
+        };
+      });
+      console.log(`[Logs] Processed ${arr.length} entries for display, Total entries:`, arr);
       setEntries(arr);
       setLoading(false);
       if (page >= Math.ceil(arr.length / perPage)) {

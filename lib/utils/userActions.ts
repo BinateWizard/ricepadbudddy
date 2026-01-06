@@ -9,6 +9,7 @@ import { httpsCallable } from 'firebase/functions';
 
 export interface UserActionData {
   deviceId?: string;
+  fieldId?: string;
   action: string;
   details?: Record<string, any>;
 }
@@ -16,7 +17,7 @@ export interface UserActionData {
 /**
  * Log a user action to Firestore via Cloud Function
  * 
- * @param data - Action data (deviceId, action, details)
+ * @param data - Action data (deviceId, fieldId, action, details)
  * @returns Promise with result
  */
 export async function logUserAction(data: UserActionData): Promise<{ success: boolean; actionId?: string }> {

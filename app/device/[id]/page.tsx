@@ -723,6 +723,7 @@ export default function DeviceDetail() {
       // Import the sendDeviceCommand function
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
       const { logUserAction } = await import('@/lib/utils/userActions');
+      const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
       
       const result = await sendDeviceCommand(
         deviceId,
@@ -743,17 +744,31 @@ export default function DeviceDetail() {
         const msg = `✓ Relay ${relayNum} turned ${newState ? 'ON' : 'OFF'}`;
         console.log(msg);
         
-        // Log successful action
-        await logUserAction({
-          deviceId,
-          action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
-          details: {
-            relayNumber: relayNum,
-            state: newState ? 'ON' : 'OFF',
+        // Log to both user actions (for Control Panel History) and device actions (for Field logs)
+        await Promise.all([
+          logUserAction({
+            deviceId,
+            fieldId: fieldInfo?.id,
+            action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+            details: {
+              relayNumber: relayNum,
+              state: newState ? 'ON' : 'OFF',
+              result: 'success',
+              source: 'device_page'
+            }
+          }),
+          logDeviceAction({
+            deviceId,
+            userId: user.uid,
+            fieldId: fieldInfo?.id || '',
+            nodeId: 'ESP32A',
+            action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+            actionType: 'relay',
+            params: { relay: relayNum, state: newState ? 'ON' : 'OFF' },
             result: 'success',
-            source: 'device_page'
-          }
-        });
+            details: { source: 'device_page' }
+          })
+        ]);
         
         // Optional: Show toast notification instead of alert
         // For now, we'll skip the alert to avoid blocking UI
@@ -761,19 +776,34 @@ export default function DeviceDetail() {
         // Timeout - device may be offline
         alert(`⏱️ Relay ${relayNum} command timeout. Device may be offline or busy. Please check device status.`);
         
-        // Log timeout
+        // Log timeout to both locations
         const { logUserAction } = await import('@/lib/utils/userActions');
-        await logUserAction({
-          deviceId,
-          action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
-          details: {
-            relayNumber: relayNum,
-            state: newState ? 'ON' : 'OFF',
+        const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
+        await Promise.all([
+          logUserAction({
+            deviceId,
+            fieldId: fieldInfo?.id,
+            action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+            details: {
+              relayNumber: relayNum,
+              state: newState ? 'ON' : 'OFF',
+              result: 'timeout',
+              message: 'Device offline or busy',
+              source: 'device_page'
+            }
+          }),
+          logDeviceAction({
+            deviceId,
+            userId: user.uid,
+            fieldId: fieldInfo?.id || '',
+            nodeId: 'ESP32A',
+            action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+            actionType: 'relay',
+            params: { relay: relayNum, state: newState ? 'ON' : 'OFF' },
             result: 'timeout',
-            message: 'Device offline or busy',
-            source: 'device_page'
-          }
-        });
+            details: { source: 'device_page', message: 'Device offline or busy' }
+          })
+        ]);
       } else {
         // Other error
         throw new Error(result.message || 'Command failed');
@@ -782,19 +812,35 @@ export default function DeviceDetail() {
       console.error('Error toggling relay:', error);
       alert(`Failed to toggle Relay ${relayNum}. ${error instanceof Error ? error.message : 'Please try again.'}`);
       
-      // Log error
+      // Log error to both locations
       const { logUserAction } = await import('@/lib/utils/userActions');
-      await logUserAction({
-        deviceId,
-        action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
-        details: {
-          relayNumber: relayNum,
-          state: newState ? 'ON' : 'OFF',
-          result: 'error',
+      const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
+      await Promise.all([
+        logUserAction({
+          deviceId,
+          fieldId: fieldInfo?.id,
+          action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+          details: {
+            relayNumber: relayNum,
+            state: newState ? 'ON' : 'OFF',
+            result: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            source: 'device_page'
+          }
+        }),
+        logDeviceAction({
+          deviceId,
+          userId: user.uid,
+          fieldId: fieldInfo?.id || '',
+          nodeId: 'ESP32A',
+          action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
+          actionType: 'relay',
+          params: { relay: relayNum, state: newState ? 'ON' : 'OFF' },
+          result: 'failed',
           error: error instanceof Error ? error.message : 'Unknown error',
-          source: 'device_page'
-        }
-      });
+          details: { source: 'device_page' }
+        })
+      ]);
     } finally {
       // Clear processing state with a small delay to ensure UI updates
       setTimeout(() => {
@@ -830,30 +876,62 @@ export default function DeviceDetail() {
         setMotorExtended(!motorExtended);
         console.log(`✓ Motor moved ${motorAction} successfully`);
         
-        // Log successful action
-        await logUserAction({
-          deviceId,
-          action: `Motor ${motorAction}`,
-          details: {
-            motorAction,
+        // Log successful action to both locations
+        const { logUserAction } = await import('@/lib/utils/userActions');
+        const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
+        await Promise.all([
+          logUserAction({
+            deviceId,
+            fieldId: fieldInfo?.id,
+            action: `Motor ${motorAction}`,
+            details: {
+              motorAction,
+              result: 'success',
+              source: 'device_page'
+            }
+          }),
+          logDeviceAction({
+            deviceId,
+            userId: user.uid,
+            fieldId: fieldInfo?.id || '',
+            nodeId: 'ESP32B',
+            action: `Motor ${motorAction}`,
+            actionType: 'motor',
+            params: { action: motorAction },
             result: 'success',
-            source: 'device_page'
-          }
-        });
+            details: { source: 'device_page' }
+          })
+        ]);
       } else if (result.status === 'timeout') {
         alert(`⏱️ Motor command timeout. Device may be offline.`);
         
-        // Log timeout
-        await logUserAction({
-          deviceId,
-          action: `Motor ${motorAction}`,
-          details: {
-            motorAction,
+        // Log timeout to both locations
+        const { logUserAction } = await import('@/lib/utils/userActions');
+        const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
+        await Promise.all([
+          logUserAction({
+            deviceId,
+            fieldId: fieldInfo?.id,
+            action: `Motor ${motorAction}`,
+            details: {
+              motorAction,
+              result: 'timeout',
+              message: 'Device offline',
+              source: 'device_page'
+            }
+          }),
+          logDeviceAction({
+            deviceId,
+            userId: user.uid,
+            fieldId: fieldInfo?.id || '',
+            nodeId: 'ESP32B',
+            action: `Motor ${motorAction}`,
+            actionType: 'motor',
+            params: { action: motorAction },
             result: 'timeout',
-            message: 'Device offline',
-            source: 'device_page'
-          }
-        });
+            details: { source: 'device_page', message: 'Device offline' }
+          })
+        ]);
       } else {
         throw new Error(result.message || 'Command failed');
       }
@@ -861,18 +939,34 @@ export default function DeviceDetail() {
       console.error('Error toggling motor:', error);
       alert(`Failed to ${motorAction} motor. ${error instanceof Error ? error.message : 'Please try again.'}`);
       
-      // Log error
+      // Log error to both locations
       const { logUserAction } = await import('@/lib/utils/userActions');
-      await logUserAction({
-        deviceId,
-        action: `Motor ${motorAction}`,
-        details: {
-          motorAction,
-          result: 'error',
+      const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
+      await Promise.all([
+        logUserAction({
+          deviceId,
+          fieldId: fieldInfo?.id,
+          action: `Motor ${motorAction}`,
+          details: {
+            motorAction,
+            result: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            source: 'device_page'
+          }
+        }),
+        logDeviceAction({
+          deviceId,
+          userId: user.uid,
+          fieldId: fieldInfo?.id || '',
+          nodeId: 'ESP32B',
+          action: `Motor ${motorAction}`,
+          actionType: 'motor',
+          params: { action: motorAction },
+          result: 'failed',
           error: error instanceof Error ? error.message : 'Unknown error',
-          source: 'device_page'
-        }
-      });
+          details: { source: 'device_page' }
+        })
+      ]);
     } finally {
       setMotorProcessing(false);
     }
