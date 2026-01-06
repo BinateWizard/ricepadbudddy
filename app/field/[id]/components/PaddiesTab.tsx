@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { DeviceLoadingModal } from '@/components/DeviceLoadingModal';
 
 // Helper function to check device status
 function getDeviceStatus(paddy: any, deviceReadings: any[]) {
@@ -73,6 +74,36 @@ export function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onVi
   const router = useRouter();
   const [scanningDevices, setScanningDevices] = useState<Set<string>>(new Set());
   const [scanResults, setScanResults] = useState<{[deviceId: string]: {status: string; message: string; timestamp: number}}>({});
+  const [isLoadingDevice, setIsLoadingDevice] = useState(false);
+  const [loadingDeviceId, setLoadingDeviceId] = useState<string | null>(null);
+  const [navigationTimeout, setNavigationTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  const handleDeviceClick = (deviceId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLoadingDeviceId(deviceId);
+    setIsLoadingDevice(true);
+    
+    // Delay navigation to show the modal, but allow cancellation
+    const timeout = setTimeout(() => {
+      router.push(`/device/${deviceId}`);
+    }, 100);
+    setNavigationTimeout(timeout);
+  };
+
+  const handleCancelLoading = () => {
+    // Cancel the pending navigation
+    if (navigationTimeout) {
+      clearTimeout(navigationTimeout);
+      setNavigationTimeout(null);
+    }
+    setIsLoadingDevice(false);
+    setLoadingDeviceId(null);
+  };
+
+  const handleLoadingError = (error: string) => {
+    console.error('Device loading error:', error);
+    // Error state is shown in the modal, user can close it
+  };
 
   const handleScanDevice = async (e: React.MouseEvent, paddy: any) => {
     e.stopPropagation();
@@ -134,6 +165,16 @@ export function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onVi
 
   return (
     <div className="space-y-4 -mx-1 sm:mx-0">
+      {/* Loading Modal */}
+      {loadingDeviceId && (
+        <DeviceLoadingModal
+          isOpen={isLoadingDevice}
+          deviceId={loadingDeviceId}
+          onCancel={handleCancelLoading}
+          onError={handleLoadingError}
+        />
+      )}
+      
       <div className="flex items-center justify-between px-1 sm:px-0 mt-1">
         <h2 className="text-2xl font-bold text-gray-900">Connected Paddies</h2>
       </div>
@@ -155,7 +196,7 @@ export function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onVi
             return (
               <div 
                 key={paddy.id} 
-                onClick={() => router.push(`/device/${paddy.deviceId}`)}
+                onClick={(e) => handleDeviceClick(paddy.deviceId, e)}
                 className="bg-white rounded-xl shadow-md border border-gray-200 p-4 sm:p-6 hover:border-green-500 hover:shadow-lg transition-all cursor-pointer">
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex-1">

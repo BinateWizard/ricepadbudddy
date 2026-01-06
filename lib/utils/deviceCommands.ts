@@ -10,7 +10,7 @@ import { ref, get, update } from 'firebase/database';
 
 export interface DeviceCommand {
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C';
-  role: 'relay' | 'motor' | 'npk';
+  role: 'relay' | 'motor' | 'npk' | 'gps';
   action: string;
   relay?: number;
   params?: Record<string, any>;
@@ -46,7 +46,7 @@ export interface CommandResult {
 export async function sendDeviceCommand(
   deviceId: string,
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C',
-  role: 'relay' | 'motor' | 'npk',
+  role: 'relay' | 'motor' | 'npk' | 'gps',
   action: string,
   params: Record<string, any> = {},
   userId: string
@@ -79,10 +79,24 @@ export async function sendDeviceCommand(
     // Write directly to RTDB
     const deviceRef = ref(database, `devices/${deviceId}`);
     
-    // For relay commands, write to relay-specific path
-    const commandPath = (role === 'relay' && params.relay) 
-      ? `commands/${nodeId}/relay${params.relay}`
-      : `commands/${nodeId}`;
+    // Determine command path based on role and node
+    let commandPath: string;
+    if (role === 'relay' && params.relay) {
+      // Relay commands: /commands/ESP32A/relay1, relay2, etc.
+      commandPath = `commands/${nodeId}/relay${params.relay}`;
+    } else if (role === 'motor') {
+      // Motor commands: /commands/ESP32B/motor
+      commandPath = `commands/${nodeId}/motor`;
+    } else if (role === 'gps') {
+      // GPS commands: /commands/ESP32B/gps
+      commandPath = `commands/${nodeId}/gps`;
+    } else if (role === 'npk') {
+      // NPK commands: /commands/ESP32C
+      commandPath = `commands/${nodeId}`;
+    } else {
+      // Default: /commands/{nodeId}
+      commandPath = `commands/${nodeId}`;
+    }
     
     await update(deviceRef, {
       [commandPath]: commandData,

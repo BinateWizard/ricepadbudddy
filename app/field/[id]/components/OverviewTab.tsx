@@ -29,6 +29,7 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
   const { user } = useAuth();
   const [completedTasks, setCompletedTasks] = useState<{ [key: string]: boolean }>({});
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [showFinished, setShowFinished] = useState(false);
 
   if (!field) return null;
 
@@ -71,17 +72,42 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
     ...regularActivities
   ].sort((a, b) => a.day - b.day);
 
-  const currentAndUpcomingActivities = allActivities.filter(activity => {
-    const isPrePlanting = (activity as any)._isPrePlanting;
-    
-    if (isPrePlanting) {
-      return true;
-    } else {
-      // Show activities from lookback period up to end of current stage
-      return activity.day >= (daysSincePlanting - lookbackDays) && 
-             activity.day <= (currentStage?.endDay || daysSincePlanting + 14);
-    }
-  }).sort((a, b) => a.day - b.day);
+  // Filter activities based on showFinished toggle
+  const currentAndUpcomingActivities = showFinished
+    ? // Show completed tasks sorted by most recent first
+      allActivities.filter((activity, index) => {
+        const taskKey = `day-${activity.day}-${index}`;
+        return completedTasks[taskKey] === true;
+      }).sort((a, b) => b.day - a.day)
+    : // Show ONLY uncompleted tasks, sorted by stage priority (current stage first)
+      allActivities
+        .filter((activity, index) => {
+          const taskKey = `day-${activity.day}-${index}`;
+          const isCompleted = completedTasks[taskKey] === true;
+          const isPrePlanting = (activity as any)._isPrePlanting;
+          
+          // Only show uncompleted tasks
+          if (isCompleted) return false;
+          
+          if (isPrePlanting) {
+            return true;
+          } else {
+            // Show activities from lookback period up to end of current stage
+            return activity.day >= (daysSincePlanting - lookbackDays) && 
+                   activity.day <= (currentStage?.endDay || daysSincePlanting + 14);
+          }
+        })
+        .sort((a, b) => {
+          // Sort by stage priority: current stage tasks first, then by day
+          const aIsCurrentStage = currentStage && a.day >= currentStage.startDay && a.day <= currentStage.endDay;
+          const bIsCurrentStage = currentStage && b.day >= currentStage.startDay && b.day <= currentStage.endDay;
+          
+          if (aIsCurrentStage && !bIsCurrentStage) return -1;
+          if (!aIsCurrentStage && bIsCurrentStage) return 1;
+          
+          // Within same priority, sort by day
+          return a.day - b.day;
+        });
 
   const varietyTriggers = VARIETY_ACTIVITY_TRIGGERS[field.riceVariety] || [];
   const currentTriggers = varietyTriggers.filter(t => t.stage === currentStage?.name);
@@ -379,13 +405,22 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
           <div className="space-y-3">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-gray-700">
-                {daysSincePlanting < 0 ? 'Pre-Planting & Upcoming Activities' : 
+                {showFinished ? 'Finished Activities' :
+                 daysSincePlanting < 0 ? 'Pre-Planting & Upcoming Activities' : 
                  daysSincePlanting === 0 ? 'Today & Upcoming Activities' :
                  'Activities & Tasks'}
               </h3>
-              <span className="text-xs text-gray-500">
-                {Object.values(completedTasks).filter(Boolean).length} / {currentAndUpcomingActivities.length} completed
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">
+                  {Object.values(completedTasks).filter(Boolean).length} / {allActivities.length} completed
+                </span>
+                <button
+                  onClick={() => setShowFinished(!showFinished)}
+                  className="text-xs px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium transition-colors"
+                >
+                  {showFinished ? 'Show Upcoming' : 'Show Finished'}
+                </button>
+              </div>
             </div>
             {currentAndUpcomingActivities.map((activity, index) => {
               const taskKey = `day-${activity.day}-${index}`;
@@ -402,24 +437,24 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
               return (
                 <div 
                   key={index} 
-                  className={`flex items-start gap-3 p-3 rounded-lg transition-colors cursor-pointer ${
+                  className={`flex items-start gap-3 p-3 rounded-lg transition-colors ${
                     isCompleted 
-                      ? 'bg-green-50 hover:bg-green-100 border border-green-200' 
+                      ? 'bg-green-50 border border-green-200' 
                       : isToday 
-                      ? 'bg-yellow-50 hover:bg-yellow-100 border border-yellow-300'
+                      ? 'bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 cursor-pointer'
                       : isPrePlanting
-                      ? 'bg-purple-50 hover:bg-purple-100 border border-purple-200'
-                      : 'bg-gray-50 hover:bg-gray-100'
+                      ? 'bg-purple-50 hover:bg-purple-100 border border-purple-200 cursor-pointer'
+                      : 'bg-gray-50 hover:bg-gray-100 cursor-pointer'
                   }`}
-                  onClick={() => !loadingTasks && toggleTask(taskKey)}
+                  onClick={() => !loadingTasks && !showFinished && toggleTask(taskKey)}
                 >
                   <input
                     type="checkbox"
                     checked={isCompleted}
                     onChange={() => toggleTask(taskKey)}
                     onClick={(e) => e.stopPropagation()}
-                    disabled={loadingTasks}
-                    className="mt-1 w-5 h-5 text-green-600 rounded focus:ring-green-500 cursor-pointer disabled:opacity-50"
+                    disabled={loadingTasks || showFinished}
+                    className="mt-1 w-5 h-5 text-green-600 rounded focus:ring-green-500 disabled:opacity-100 disabled:cursor-not-allowed cursor-pointer"
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -473,7 +508,19 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
             })}
           </div>
         ) : (
-          <p className="text-gray-500 text-center py-8">No upcoming activities</p>
+          <div className="text-center py-8">
+            <p className="text-gray-500">
+              {showFinished ? 'No finished activities yet' : 'No upcoming activities'}
+            </p>
+            {showFinished && (
+              <button
+                onClick={() => setShowFinished(false)}
+                className="mt-2 text-sm text-green-600 hover:text-green-700 font-medium"
+              >
+                View upcoming activities
+              </button>
+            )}
+          </div>
         )}
       </div>
 

@@ -6,6 +6,7 @@ interface DeviceInformationProps {
   paddyInfo: any;
   fieldInfo: any;
   gpsData: any;
+  deviceOnlineStatus: {online: boolean; lastChecked: number} | null;
   onViewLocation: () => void;
   onSavePaddyName: (name: string) => Promise<void>;
 }
@@ -15,6 +16,7 @@ export function DeviceInformation({
   paddyInfo,
   fieldInfo,
   gpsData,
+  deviceOnlineStatus,
   onViewLocation,
   onSavePaddyName
 }: DeviceInformationProps) {
@@ -138,7 +140,20 @@ export function DeviceInformation({
         </div>
         <div className="flex justify-between py-2">
           <span className="text-gray-600">Connection</span>
-          <span className="font-medium text-green-600">Active</span>
+          {deviceOnlineStatus ? (
+            <div className="flex items-center gap-2">
+              <span className={`font-medium ${
+                deviceOnlineStatus.online ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {deviceOnlineStatus.online ? 'Active' : 'Offline'}
+              </span>
+              <div className={`w-2 h-2 rounded-full ${
+                deviceOnlineStatus.online ? 'bg-green-600 animate-pulse' : 'bg-red-600'
+              }`} />
+            </div>
+          ) : (
+            <span className="font-medium text-gray-400">Unknown</span>
+          )}
         </div>
       </div>
     </div>

@@ -11,9 +11,10 @@ import {
   Legend,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { DeviceStatus, SensorReadings, ControlPanel, DeviceInformation, DataTrends, DeviceStatistics, BoundaryMappingModal, LocationModal } from './components';
+import { DeviceStatus, SensorReadings, ControlPanel, DeviceInformation, DataTrends, DeviceStatistics, BoundaryMappingModal, LocationModal, TrendsChart } from './components';
 import { useWeatherData, useGPSData } from './hooks/useDeviceData';
 import { getVarietyByName } from '@/lib/utils/varietyHelpers';
+import { calculatePolygonArea, formatTimestamp, validateCoordinates, getDeviceStatusDisplay } from './utils/deviceHelpers';
 
 // Register Chart.js components
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
@@ -33,9 +34,6 @@ import { Menu, Home as HomeIcon, BookOpen, HelpCircle, Info, LogOut, Shield } fr
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
 import { usePaddyLiveData } from "@/lib/hooks/usePaddyLiveData";
 import { getDeviceLogs } from '@/lib/utils/deviceLogs';
-
-// Admin email for access control
-const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
 
 export default function DeviceDetail() {
   const params = useParams();
@@ -319,73 +317,7 @@ export default function DeviceDetail() {
   }, [timeRange]);
     
   // Get device status - use Cloud Function's online status determination
-  const getDeviceStatusDisplay = () => {
-    // Use the online status computed by Cloud Function (handles heartbeat conversion)
-    const isDeviceOnline = deviceOnlineStatus?.online === true;
-    
-    const hasNPK = paddyLiveData.data && (
-      paddyLiveData.data.nitrogen !== undefined || 
-      paddyLiveData.data.phosphorus !== undefined || 
-      paddyLiveData.data.potassium !== undefined
-    );
-    
-    if (paddyLiveData.loading) {
-      return {
-        status: 'loading',
-        message: 'Loading latest sensor data...',
-        color: 'gray',
-        badge: 'Loading',
-        lastUpdate: 'Loading...'
-      };
-    }
-    
-    // If device is offline according to Cloud Function
-    if (!isDeviceOnline && deviceOnlineStatus) {
-      const lastChecked = new Date(deviceOnlineStatus.lastChecked).toLocaleString();
-      return {
-        status: 'offline',
-        message: `Device is offline. Last checked: ${lastChecked}. Check power and network connection.`,
-        color: 'red',
-        badge: 'Offline',
-        lastUpdate: lastChecked
-      };
-    }
-    
-    // Device is online (according to heartbeat monitor)
-    // Check if we have recent sensor data
-    const hasRecentData = paddyLiveData.data?.timestamp && 
-      (Date.now() - paddyLiveData.data.timestamp.getTime()) < 15 * 60 * 1000;
-    
-    if (!paddyLiveData.data || !hasRecentData) {
-      return {
-        status: 'sensor-issue',
-        message: 'Device connected but no recent sensor readings. Sensor may need calibration.',
-        color: 'yellow',
-        badge: 'Sensor Issue',
-        lastUpdate: deviceOnlineStatus ? new Date(deviceOnlineStatus.lastChecked).toLocaleTimeString() : 'Recently'
-      };
-    }
-    
-    if (!hasNPK) {
-      return {
-        status: 'sensor-issue',
-        message: 'Device connected but sensor readings unavailable. Check sensor connections.',
-        color: 'yellow',
-        badge: 'Sensor Issue',
-        lastUpdate: paddyLiveData.data.timestamp ? paddyLiveData.data.timestamp.toLocaleTimeString() : 'Recently'
-      };
-    }
-    
-    return {
-      status: 'ok',
-      message: 'All systems operational',
-      color: 'green',
-      badge: 'Connected',
-      lastUpdate: paddyLiveData.data.timestamp ? paddyLiveData.data.timestamp.toLocaleTimeString() : 'Just now'
-    };
-  };
-  
-  const deviceStatus = getDeviceStatusDisplay();
+  const deviceStatus = getDeviceStatusDisplay(deviceOnlineStatus, paddyLiveData);
   
   // Fetch device and paddy information
   useEffect(() => {
@@ -523,14 +455,44 @@ export default function DeviceDetail() {
 
   // Handle location view
   const handleViewLocation = async () => {
+    if (!user) return;
+
     setShowLocationModal(true);
     setLoadingGps(true);
     
     try {
-      // GPS data is already available via useGPSData hook
-      // Just open the modal to display it
+      // Send GPS read command to ESP32B
+      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+      const { logUserAction } = await import('@/lib/utils/userActions');
+      
+      const result = await sendDeviceCommand(
+        deviceId,
+        'ESP32B',
+        'gps',
+        'read',
+        {},
+        user.uid
+      );
+      
+      if (result.success) {
+        console.log('✓ GPS read command sent successfully');
+        
+        // Log successful action
+        await logUserAction({
+          deviceId,
+          action: 'GPS Read',
+          details: {
+            result: 'success',
+            source: 'device_page'
+          }
+        });
+        
+        // GPS data will be updated via real-time listener
+      } else {
+        console.warn('GPS read command failed:', result.message);
+      }
     } catch (error) {
-      console.error('Error fetching GPS data:', error);
+      console.error('Error sending GPS read command:', error);
     } finally {
       setLoadingGps(false);
     }
@@ -637,25 +599,14 @@ export default function DeviceDetail() {
   };
   
   const handleAddCoordinateFromInput = () => {
-    const lat = parseFloat(inputLat);
-    const lng = parseFloat(inputLng);
+    const validation = validateCoordinates(inputLat, inputLng);
     
-    if (isNaN(lat) || isNaN(lng)) {
-      alert('Please enter valid latitude and longitude values');
+    if (!validation.valid) {
+      alert(validation.error);
       return;
     }
     
-    if (lat < -90 || lat > 90) {
-      alert('Latitude must be between -90 and 90');
-      return;
-    }
-    
-    if (lng < -180 || lng > 180) {
-      alert('Longitude must be between -180 and 180');
-      return;
-    }
-    
-    handleAddPoint(lat, lng);
+    handleAddPoint(parseFloat(inputLat), parseFloat(inputLng));
     setInputLat('');
     setInputLng('');
   };
@@ -670,26 +621,6 @@ export default function DeviceDetail() {
   
   const handleClearPolygon = () => {
     setPolygonCoords([]);
-  };
-  
-  const calculatePolygonArea = (coords: {lat: number; lng: number}[]) => {
-    if (coords.length < 3) return 0;
-    
-    const R = 6371000; // Earth radius in meters
-    let area = 0;
-    
-    for (let i = 0; i < coords.length; i++) {
-      const j = (i + 1) % coords.length;
-      const lat1 = coords[i].lat * Math.PI / 180;
-      const lat2 = coords[j].lat * Math.PI / 180;
-      const lng1 = coords[i].lng * Math.PI / 180;
-      const lng2 = coords[j].lng * Math.PI / 180;
-      
-      area += (lng2 - lng1) * (2 + Math.sin(lat1) + Math.sin(lat2));
-    }
-    
-    area = Math.abs(area * R * R / 2);
-    return area;
   };
   
   const handleSaveBoundary = async () => {
@@ -863,7 +794,8 @@ export default function DeviceDetail() {
   const handleMotorToggle = async () => {
     if (!user) return;
 
-    const motorAction = motorExtended ? 'retract' : 'extend';
+    // ESP32B expects "down" or "up" actions
+    const motorAction = motorExtended ? 'up' : 'down';
     
     setMotorProcessing(true);
     try {
@@ -875,13 +807,13 @@ export default function DeviceDetail() {
         'ESP32B',
         'motor',
         motorAction,
-        { duration: 5000 },
+        {},
         user.uid
       );
 
       if (result.success && result.status === 'completed') {
         setMotorExtended(!motorExtended);
-        console.log(`✓ Motor ${motorAction}ed successfully`);
+        console.log(`✓ Motor moved ${motorAction} successfully`);
         
         // Log successful action
         await logUserAction({
@@ -929,41 +861,6 @@ export default function DeviceDetail() {
     } finally {
       setMotorProcessing(false);
     }
-  };
-
-  // Format timestamp
-  const formatTimestamp = (ts: number) => {
-    if (!ts) return 'Unknown';
-    
-    // Try to determine if timestamp is in seconds or milliseconds
-    // If ts is less than a reasonable date in seconds (e.g., year 2000), it's likely in seconds
-    const year2000InSeconds = 946684800;
-    const year2000InMs = 946684800000;
-    
-    let date: Date;
-    if (ts < year2000InSeconds) {
-      // Very small number, might be relative time or invalid
-      return `Timestamp: ${ts}`;
-    } else if (ts < year2000InMs) {
-      // Likely in seconds
-      date = new Date(ts * 1000);
-    } else {
-      // Likely in milliseconds
-      date = new Date(ts);
-    }
-    
-    if (isNaN(date.getTime())) {
-      return `Timestamp: ${ts}`;
-    }
-    
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
   };
 
   return (
@@ -1044,354 +941,24 @@ export default function DeviceDetail() {
           )}
 
           {/* Data Trends Component */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Data Trends</h3>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={async () => {
-                    if (!paddyInfo || !fieldInfo || !user) {
-                      alert('Device not yet loaded');
-                      return;
-                    }
-                    try {
-                      const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
-                      await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, user.uid);
-                      alert('Scan initiated successfully');
-                    } catch (error: any) {
-                      console.error('Scan error:', error);
-                      alert('Scan failed: ' + (error?.message || 'Unknown error'));
-                    }
-                  }}
-                  className="px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5"
-                  title="Scan device now"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                  <span className="hidden sm:inline">Scan Now</span>
-                  <span className="sm:hidden">Scan</span>
-                </button>
-                <button
-                  onClick={() => setTimeRange('7d')}
-                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
-                    timeRange === '7d' 
-                      ? 'bg-green-600 text-white' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  7 Days
-                </button>
-                <button
-                  onClick={() => setTimeRange('30d')}
-                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
-                    timeRange === '30d' 
-                      ? 'bg-green-600 text-white' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  30 Days
-                </button>
-                <button
-                  onClick={() => setTimeRange('90d')}
-                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
-                    timeRange === '90d' 
-                      ? 'bg-green-600 text-white' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  90 Days
-                </button>
-                <button
-                  onClick={() => setTimeRange('all')}
-                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
-                    timeRange === 'all' 
-                      ? 'bg-green-600 text-white' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  All Time
-                </button>
-              </div>
-            </div>
-            <div>
-              {isLoadingLogs ? (
-                <div className="flex flex-col items-center py-8">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-3"></div>
-                  <p className="text-gray-500">Loading historical data...</p>
-                </div>
-              ) : (() => {
-                // Merge historical and real-time logs, dedupe, sort
-                const allLogs = [...historicalLogs, ...realtimeLogs];
-                const seen = new Set<string>();
-                const deduped = allLogs.filter(log => {
-                  // Use document ID if available, otherwise use a combination of timestamp, values, and source
-                  // This ensures we don't lose legitimate readings that might have similar timestamps
-                  const key = log.id 
-                    ? `${log._src || 'unknown'}-${log.id}` 
-                    : `${log._src || 'unknown'}-${log.timestamp.getTime()}-${log.nitrogen ?? ''}-${log.phosphorus ?? ''}-${log.potassium ?? ''}`;
-                  if (seen.has(key)) return false;
-                  seen.add(key);
-                  return true;
-                });
-                const sortedLogs = deduped
-                  .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()); // Newest first
-                const chartLogs = sortedLogs
-                  .slice()
-                  .reverse()
-                  .slice(-10); // Last 10 for chart (oldest to newest)
-
-                // Pagination logic
-                const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
-                const startIndex = (currentPage - 1) * itemsPerPage;
-                const endIndex = startIndex + itemsPerPage;
-                const paginatedLogs = sortedLogs.slice(startIndex, endIndex);
-
-                return sortedLogs.length > 0 ? (
-                  <div className="space-y-6">
-                    {/* Info Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <div>
-                        <p className="text-sm text-gray-600">
-                          Showing <span className="font-semibold text-gray-900">{sortedLogs.length}</span> reading{sortedLogs.length !== 1 ? 's' : ''} 
-                          {timeRange !== 'all' && (
-                            <span> over the last {
-                              timeRange === '7d' ? '7 days' :
-                              timeRange === '30d' ? '30 days' :
-                              timeRange === '90d' ? '90 days' :
-                              'recording period'
-                            }</span>
-                          )}
-                        </p>
-                        <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                          <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                          Live updates enabled
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Chart */}
-                    <div className="bg-gray-50 rounded-xl p-4">
-                      <TrendsChart 
-                        logs={chartLogs} 
-                        key={`${historicalLogs.length}-${realtimeLogs.length}-${realtimeLogs[realtimeLogs.length - 1]?.timestamp?.getTime() || 0}`} 
-                      />
-                    </div>
-
-                    {/* Data Table */}
-                    <div className="overflow-hidden">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-                        <h4 className="text-md font-semibold text-gray-900">Reading History</h4>
-                        {totalPages > 1 && (
-                          <p className="text-sm text-gray-600">
-                            Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
-                            {' '}({startIndex + 1}-{Math.min(endIndex, sortedLogs.length)} of {sortedLogs.length})
-                          </p>
-                        )}
-                      </div>
-                      
-                      {/* Desktop Table */}
-                      <div className="hidden md:block overflow-x-auto">
-                        <table className="w-full border-collapse">
-                          <thead>
-                            <tr className="bg-gray-50 border-b-2 border-gray-200">
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Timestamp</th>
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Nitrogen (N)</th>
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Phosphorus (P)</th>
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Potassium (K)</th>
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Source</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
-                            {paginatedLogs.map((log, index) => {
-                              const globalIndex = startIndex + index;
-                              return (
-                                <tr 
-                                  key={`${log.id || 'log'}-${globalIndex}-${log.timestamp.getTime()}`} 
-                                  className={`hover:bg-gray-50 transition-colors ${
-                                    globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'bg-green-50' : ''
-                                  }`}
-                                >
-                                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                    {log.timestamp.toLocaleString('en-US', {
-                                      year: 'numeric',
-                                      month: 'short',
-                                      day: 'numeric',
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                      second: '2-digit'
-                                    })}
-                                  </td>
-                                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-700">
-                                    {log.nitrogen !== undefined && log.nitrogen !== null ? `${Math.round(log.nitrogen)} mg/kg` : '--'}
-                                  </td>
-                                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-purple-700">
-                                    {log.phosphorus !== undefined && log.phosphorus !== null ? `${Math.round(log.phosphorus)} mg/kg` : '--'}
-                                  </td>
-                                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-orange-700">
-                                    {log.potassium !== undefined && log.potassium !== null ? `${Math.round(log.potassium)} mg/kg` : '--'}
-                                  </td>
-                                  <td className="px-4 py-3 whitespace-nowrap text-xs">
-                                    <span className={`px-2 py-1 rounded-full ${
-                                      log._src === 'rtdb' ? 'bg-green-100 text-green-800' :
-                                      log._src === 'paddy' ? 'bg-blue-100 text-blue-800' :
-                                      'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {log._src === 'rtdb' ? 'Live' : log._src === 'paddy' ? 'Paddy Log' : 'Device Log'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Mobile Cards */}
-                      <div className="md:hidden space-y-3">
-                        {paginatedLogs.map((log, index) => {
-                          const globalIndex = startIndex + index;
-                          return (
-                            <div 
-                              key={`${log.id || 'log'}-${globalIndex}-${log.timestamp.getTime()}`}
-                              className={`bg-white border rounded-lg p-4 shadow-sm ${
-                                globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'border-green-300 bg-green-50' : 'border-gray-200'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between mb-3">
-                                <div className="flex-1">
-                                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Timestamp</p>
-                                  <p className="text-sm text-gray-900">
-                                    {log.timestamp.toLocaleString('en-US', {
-                                      month: 'short',
-                                      day: 'numeric',
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                      second: '2-digit'
-                                    })}
-                                  </p>
-                                  <p className="text-xs text-gray-500 mt-1">
-                                    {log.timestamp.toLocaleDateString('en-US', { year: 'numeric' })}
-                                  </p>
-                                </div>
-                                <span className={`px-2 py-1 rounded-full text-xs ${
-                                  log._src === 'rtdb' ? 'bg-green-100 text-green-800' :
-                                  log._src === 'paddy' ? 'bg-blue-100 text-blue-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {log._src === 'rtdb' ? 'Live' : log._src === 'paddy' ? 'Paddy' : 'Device'}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-3 gap-3">
-                                <div>
-                                  <p className="text-xs font-semibold text-blue-600 mb-1">Nitrogen (N)</p>
-                                  <p className="text-lg font-bold text-blue-700">
-                                    {log.nitrogen !== undefined && log.nitrogen !== null ? Math.round(log.nitrogen) : '--'}
-                                  </p>
-                                  <p className="text-xs text-gray-500">mg/kg</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs font-semibold text-purple-600 mb-1">Phosphorus (P)</p>
-                                  <p className="text-lg font-bold text-purple-700">
-                                    {log.phosphorus !== undefined && log.phosphorus !== null ? Math.round(log.phosphorus) : '--'}
-                                  </p>
-                                  <p className="text-xs text-gray-500">mg/kg</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs font-semibold text-orange-600 mb-1">Potassium (K)</p>
-                                  <p className="text-lg font-bold text-orange-700">
-                                    {log.potassium !== undefined && log.potassium !== null ? Math.round(log.potassium) : '--'}
-                                  </p>
-                                  <p className="text-xs text-gray-500">mg/kg</p>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Pagination Controls */}
-                      {totalPages > 1 && (
-                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                          <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
-                            Showing {startIndex + 1} to {Math.min(endIndex, sortedLogs.length)} of {sortedLogs.length} readings
-                          </div>
-                          <div className="flex items-center gap-1 sm:gap-2">
-                            <button
-                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                              disabled={currentPage === 1}
-                              className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
-                                currentPage === 1
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                              }`}
-                            >
-                              <span className="hidden sm:inline">Previous</span>
-                              <span className="sm:hidden">Prev</span>
-                            </button>
-                            
-                            {/* Page Numbers */}
-                            <div className="flex items-center gap-1">
-                              {(() => {
-                                const maxPages = 5;
-                                const pagesToShow = Math.min(maxPages, totalPages);
-                                
-                                let startPage = 1;
-                                if (totalPages > maxPages) {
-                                  if (currentPage <= 3) {
-                                    startPage = 1;
-                                  } else if (currentPage >= totalPages - 2) {
-                                    startPage = totalPages - maxPages + 1;
-                                  } else {
-                                    startPage = currentPage - 2;
-                                  }
-                                }
-                                
-                                return Array.from({ length: pagesToShow }, (_, i) => {
-                                  const pageNum = startPage + i;
-                                  return (
-                                    <button
-                                      key={pageNum}
-                                      onClick={() => setCurrentPage(pageNum)}
-                                      className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
-                                        currentPage === pageNum
-                                          ? 'bg-green-600 text-white'
-                                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                      }`}
-                                    >
-                                      {pageNum}
-                                    </button>
-                                  );
-                                });
-                              })()}
-                            </div>
-                            
-                            <button
-                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                              disabled={currentPage === totalPages}
-                              className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
-                                currentPage === totalPages
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                              }`}
-                            >
-                              Next
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <div className="text-5xl mb-3">📊</div>
-                    <p className="text-gray-500">No historical data found</p>
-                    <p className="text-sm text-gray-400 mt-1">Sensor readings will be logged automatically</p>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <DataTrends
+            timeRange={timeRange}
+            isLoadingLogs={isLoadingLogs}
+            historicalLogs={historicalLogs}
+            realtimeLogs={realtimeLogs}
+            currentPage={currentPage}
+            itemsPerPage={itemsPerPage}
+            onTimeRangeChange={setTimeRange}
+            onPageChange={setCurrentPage}
+            onScanDevice={async () => {
+              if (!paddyInfo || !fieldInfo || !user) {
+                alert('Device not yet loaded');
+                return;
+              }
+              const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
+              await sendDeviceCommand(deviceId, 'ESP32C', 'npk', 'scan', {}, user.uid);
+            }}
+          />
 
           {/* Device Control Component (Control Panel) */}
           <ControlPanel
@@ -1411,294 +978,21 @@ export default function DeviceDetail() {
             onMotorToggle={handleMotorToggle}
           />
 
-          {/* Control Panel */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border-0" style={{display: 'none'}}>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 ui-heading-mono">Device Controls</h3>
-            
-            {/* Success Banner */}
-            {scanSuccess && (
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 animate-fade-in">
-                <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm text-green-800 font-medium">✓ Scan command sent successfully!</span>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Scan Device */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-green-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">📡 Scan NPK</h4>
-                    <p className="text-xs text-gray-600 mt-1">Request immediate sensor reading</p>
-                  </div>
-                  <span className="text-2xl">🔬</span>
-                </div>
-                <button
-                  onClick={handleScanNow}
-                  disabled={isScanning}
-                  className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
-                >
-                  {isScanning ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Scanning...
-                    </span>
-                  ) : 'Scan Now'}
-                </button>
-                {lastScanTime && (
-                  <p className="text-xs text-gray-500 mt-2 text-center">
-                    Last scan: {lastScanTime.toLocaleTimeString()}
-                  </p>
-                )}
-              </div>
-              
-              {/* Map Boundary */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">🗺️ Paddy Boundary</h4>
-                    <p className="text-xs text-gray-600 mt-1">
-                      {polygonCoords.length > 0 
-                        ? `${polygonCoords.length} points mapped (${(calculatePolygonArea(polygonCoords) / 10000).toFixed(2)} ha)`
-                        : 'Map the paddy field area'}
-                    </p>
-                  </div>
-                  <span className="text-2xl">📍</span>
-                </div>
-                <button
-                  onClick={handleOpenBoundaryMap}
-                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                >
-                  {polygonCoords.length > 0 ? '✏️ Edit Boundary' : '🗺️ Map Area'}
-                </button>
-                {hasSavedBoundary && (
-                  <button
-                    onClick={handleRemoveBoundary}
-                    disabled={isSavingBoundary}
-                    className="w-full mt-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    🗑️ Remove Boundary
-                  </button>
-                )}
-              </div>
-              
-              {/* Get Location */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-purple-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">📍 GPS Location</h4>
-                    <p className="text-xs text-gray-600 mt-1">View device location</p>
-                  </div>
-                  <span className="text-2xl">🌍</span>
-                </div>
-                <button
-                  onClick={handleViewLocation}
-                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-                >
-                  View Location
-                </button>
-                {gpsData && gpsData.lat && gpsData.lng && (
-                  <p className="text-xs text-gray-600 mt-2 text-center font-mono">
-                    {gpsData.lat.toFixed(4)}, {gpsData.lng.toFixed(4)}
-                  </p>
-                )}
-              </div>
-              
-              {/* Relay 1 */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-orange-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">⚡ Relay 1</h4>
-                    <p className="text-xs text-gray-600 mt-1">Toggle relay channel 1</p>
-                  </div>
-                  <span className={`text-sm font-bold px-2 py-1 rounded ${
-                    relayProcessing[0] ? 'bg-yellow-100 text-yellow-700' :
-                    relayStates[0] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                  }`}>
-                    {relayProcessing[0] ? 'WAIT' : relayStates[0] ? 'ON' : 'OFF'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleRelayToggle(0)}
-                  disabled={relayProcessing[0]}
-                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
-                    relayProcessing[0]
-                      ? 'bg-gray-400 cursor-not-allowed text-white'
-                      : relayStates[0]
-                      ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                      : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
-                  }`}
-                >
-                  {relayProcessing[0] ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Waiting...
-                    </>
-                  ) : (
-                    relayStates[0] ? 'Turn OFF' : 'Turn ON'
-                  )}
-                </button>
-              </div>
-              
-              {/* Relay 2 */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-orange-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">⚡ Relay 2</h4>
-                    <p className="text-xs text-gray-600 mt-1">Toggle relay channel 2</p>
-                  </div>
-                  <span className={`text-sm font-bold px-2 py-1 rounded ${
-                    relayProcessing[1] ? 'bg-yellow-100 text-yellow-700' :
-                    relayStates[1] ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                  }`}>
-                    {relayProcessing[1] ? 'WAIT' : relayStates[1] ? 'ON' : 'OFF'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleRelayToggle(1)}
-                  disabled={relayProcessing[1]}
-                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${
-                    relayProcessing[1]
-                      ? 'bg-gray-400 cursor-not-allowed text-white'
-                      : relayStates[1]
-                      ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                      : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
-                  }`}
-                >
-                  {relayProcessing[1] ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Waiting...
-                    </>
-                  ) : (
-                    relayStates[1] ? 'Turn OFF' : 'Turn ON'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Motor Controller (ESP32B) */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6" style={{display: 'none'}}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Motor Controller (ESP32B)</h3>
-              <span className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded-full">ESP32B</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Motor Control */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-semibold text-gray-900">Motor</h4>
-                  <span className="text-lg">{motorExtended ? '⬆️' : '⬇️'}</span>
-                </div>
-                <button
-                  onClick={handleMotorToggle}
-                  disabled={motorProcessing}
-                  className={`w-full px-4 py-2 rounded-lg transition-colors font-medium ${
-                    motorProcessing
-                      ? 'bg-gray-400 cursor-not-allowed text-white'
-                      : motorExtended
-                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
-                  }`}
-                >
-                  {motorProcessing ? 'Processing...' : motorExtended ? 'Retract Motor' : 'Extend Motor'}
-                </button>
-              </div>
-
-              {/* Get Location */}
-              <div className="p-4 border border-gray-200 rounded-lg hover:border-purple-500 transition-colors">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-semibold text-gray-900">Get Location</h4>
-                  <span className="text-lg">📍</span>
-                </div>
-                <button
-                  onClick={handleViewLocation}
-                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-                >
-                  View GPS Location
-                </button>
-                {gpsData && gpsData.lat && gpsData.lng && (
-                  <p className="text-xs text-gray-500 mt-2 text-center font-mono">
-                    {gpsData.lat.toFixed(6)}, {gpsData.lng.toFixed(6)}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
           {/* Device Information */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Device Information</h3>
-              <button
-                onClick={handleViewLocation}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="View GPS location"
-              >
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between py-2 border-b border-gray-100">
-                <span className="text-gray-600">Device ID</span>
-                <span className="font-medium text-gray-900">{deviceId}</span>
-              </div>
-              {paddyInfo && (
-                <>
-                  <div className="flex justify-between py-2 border-b border-gray-100">
-                    <span className="text-gray-600">Paddy Name</span>
-                    <span className="font-medium text-gray-900">{paddyInfo.paddyName}</span>
-                  </div>
-                  {paddyInfo.description && (
-                    <div className="flex justify-between py-2 border-b border-gray-100">
-                      <span className="text-gray-600">Description</span>
-                      <span className="font-medium text-gray-900">{paddyInfo.description}</span>
-                    </div>
-                  )}
-                </>
-              )}
-              {fieldInfo && (
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-gray-600">Field</span>
-                  <button 
-                    onClick={() => router.push(`/field/${fieldInfo.id}`)}
-                    className="font-medium text-green-600 hover:text-green-700"
-                  >
-                    {fieldInfo.fieldName} →
-                  </button>
-                </div>
-              )}
-              <div className="flex justify-between py-2 border-b border-gray-100">
-                <span className="text-gray-600">Connection Status</span>
-                <span className={`font-medium ${
-                  deviceStatus.color === 'green' ? 'text-green-600' :
-                  deviceStatus.color === 'yellow' ? 'text-yellow-600' :
-                  'text-red-600'
-                }`}>
-                  {deviceStatus.badge}
-                </span>
-              </div>
-              <div className="flex justify-between py-2">
-                <span className="text-gray-600">Last Heartbeat</span>
-                <span className="font-medium text-gray-900">{deviceStatus.lastUpdate}</span>
-              </div>
-            </div>
-          </div>
+          <DeviceInformation
+            deviceId={deviceId}
+            paddyInfo={paddyInfo}
+            fieldInfo={fieldInfo}
+            gpsData={gpsData}
+            deviceOnlineStatus={deviceOnlineStatus}
+            onViewLocation={handleViewLocation}
+            onSavePaddyName={async (name: string) => {
+              if (!user || !fieldInfo || !paddyInfo) return;
+              const paddyRef = doc(db, `users/${user.uid}/fields/${fieldInfo.id}/paddies/${paddyInfo.id}`);
+              await updateDoc(paddyRef, { paddyName: name });
+              setPaddyInfo({ ...paddyInfo, paddyName: name });
+            }}
+          />
 
           {/* Control Actions Log */}
           {user && (
@@ -1711,7 +1005,7 @@ export default function DeviceDetail() {
                     if (!showDeviceLogs && deviceLogs.length === 0) {
                       setLoadingDeviceLogs(true);
                       try {
-                        const result = await getDeviceLogs({ deviceId, limit: logsLimit });
+                        const result = await getDeviceLogs(deviceId, logsLimit);
                         if (result.success && result.logs) {
                           setDeviceLogs(result.logs);
                         }
@@ -1787,7 +1081,7 @@ export default function DeviceDetail() {
                                 setLogsLimit(50);
                                 setLoadingDeviceLogs(true);
                                 try {
-                                  const result = await getDeviceLogs({ deviceId, limit: 50 });
+                                  const result = await getDeviceLogs(deviceId, 50);
                                   if (result.success && result.logs) {
                                     setDeviceLogs(result.logs);
                                   }
@@ -1806,7 +1100,7 @@ export default function DeviceDetail() {
                             onClick={async () => {
                               setLoadingDeviceLogs(true);
                               try {
-                                const result = await getDeviceLogs({ deviceId, limit: logsLimit });
+                                const result = await getDeviceLogs(deviceId, logsLimit);
                                 if (result.success && result.logs) {
                                   setDeviceLogs(result.logs);
                                 }
@@ -2502,24 +1796,6 @@ export default function DeviceDetail() {
                     <span className="font-medium">About PadBuddy</span>
                   </Button>
                 )}
-
-                {/* Admin Panel - Only visible to admin */}
-                {user?.email === ADMIN_EMAIL && (
-                  <>
-                    <div className="border-t border-gray-200 my-3"></div>
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-start transition-all duration-200 relative bg-purple-50 hover:bg-purple-100 text-purple-700"
-                      onClick={() => {
-                        router.push('/admin');
-                        setIsMenuOpen(false);
-                      }}
-                    >
-                      <Shield className="mr-3 h-5 w-5" />
-                      <span className="font-medium">Admin Panel</span>
-                    </Button>
-                  </>
-                )}
               </nav>
 
               {/* Sign Out */}
@@ -2604,78 +1880,5 @@ export default function DeviceDetail() {
         </Dialog>
       </div>
     </ProtectedRoute>
-  );
-}
-
-// Trends Chart Component
-function TrendsChart({ logs }: { logs: Array<{ timestamp: Date; nitrogen?: number; phosphorus?: number; potassium?: number }> }) {
-  const { useMemo } = require('react');
-  
-  const data = useMemo(() => {
-    // Ensure chronological order (oldest → newest)
-    const ordered = [...logs].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    const labels = ordered.map((l) => l.timestamp.toLocaleString(undefined, { 
-      month: 'short', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }));
-
-    return {
-    labels,
-    datasets: [
-      {
-        label: 'Nitrogen (mg/kg)',
-        data: ordered.map((l) => l.nitrogen ?? null),
-        borderColor: '#2563eb',
-        backgroundColor: 'rgba(37, 99, 235, 0.2)',
-        tension: 0.3,
-        spanGaps: true,
-      },
-      {
-        label: 'Phosphorus (mg/kg)',
-        data: ordered.map((l) => l.phosphorus ?? null),
-        borderColor: '#7c3aed',
-        backgroundColor: 'rgba(124, 58, 237, 0.2)',
-        tension: 0.3,
-        spanGaps: true,
-      },
-      {
-        label: 'Potassium (mg/kg)',
-        data: ordered.map((l) => l.potassium ?? null),
-        borderColor: '#f59e0b',
-        backgroundColor: 'rgba(245, 158, 11, 0.2)',
-        tension: 0.3,
-        spanGaps: true,
-      },
-    ],
-    };
-  }, [logs]);
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: {
-      duration: 750,
-    },
-    plugins: {
-      legend: { position: 'top' as const },
-      tooltip: { mode: 'index' as const, intersect: false },
-    },
-    scales: {
-      y: { beginAtZero: true, title: { display: true, text: 'mg/kg' } },
-      x: {
-        ticks: {
-          maxRotation: 45,
-          minRotation: 45
-        }
-      }
-    },
-  };
-
-  return (
-    <div className="ui-chart">
-      <Line data={data} options={options} />
-    </div>
   );
 }
