@@ -52,6 +52,15 @@ export interface FieldDocument {
   startDate?: number;           // optional timestamp
   devices?: string[];           // optional array of device IDs
   plot?: PlotPoint[];           // optional array of points for area calculation
+  plots?: Array<{               // optional array of saved GPS plots (user-specific)
+    name: string;
+    coordinates: PlotPoint;
+    altitude?: number;
+    deviceId: string;
+    createdBy: string;
+    createdAt: any;
+    timestamp: number;
+  }>;
   createdAt: number | FieldValue;
 }
 

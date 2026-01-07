@@ -11,7 +11,7 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
-const HEARTBEAT_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+const HEARTBEAT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
 /**
  * Monitor Heartbeat (Real-time RTDB Trigger)

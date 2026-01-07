@@ -27,6 +27,8 @@ export interface DeviceAction {
  * 
  * Client calls this to log device control actions
  * Stores in both device logs and user action logs
+ * 
+ * Note: onCall functions handle CORS automatically
  */
 export const logDeviceAction = functions.https.onCall(async (data: DeviceAction, context) => {
   // Verify authentication

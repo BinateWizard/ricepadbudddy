@@ -258,7 +258,7 @@ async function checkDeviceStatus(
   fieldId?: string
 ): Promise<{ online: boolean; timeSinceHeartbeat: number }> {
   const database = admin.database();
-  const HEARTBEAT_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+  const HEARTBEAT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
   
   // Try new hierarchy first
   let devicePath = fieldId

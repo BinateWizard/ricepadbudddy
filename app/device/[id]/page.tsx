@@ -15,6 +15,7 @@ import { DeviceStatus, SensorReadings, ControlPanel, DeviceInformation, DataTren
 import { useWeatherData, useGPSData } from './hooks/useDeviceData';
 import { getVarietyByName } from '@/lib/utils/varietyHelpers';
 import { calculatePolygonArea, formatTimestamp, validateCoordinates, getDeviceStatusDisplay } from './utils/deviceHelpers';
+import { GetLocationModal } from '@/components/GetLocationModal';
 
 // Register Chart.js components
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
@@ -34,6 +35,10 @@ import { Menu, Home as HomeIcon, BookOpen, HelpCircle, Info, LogOut, Shield } fr
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
 import { usePaddyLiveData } from "@/lib/hooks/usePaddyLiveData";
 import { getDeviceLogs } from '@/lib/utils/deviceLogs';
+
+// Import logging functions
+import { logUserAction } from '@/lib/utils/userActions';
+import { logDeviceAction } from '@/lib/utils/deviceLogs';
 
 export default function DeviceDetail() {
   const params = useParams();
@@ -56,6 +61,7 @@ export default function DeviceDetail() {
   const [fieldInfo, setFieldInfo] = useState<any>(null);
   const [deviceReadings, setDeviceReadings] = useState<any[]>([]);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showGetLocationModal, setShowGetLocationModal] = useState(false);
   const gpsData = useGPSData(deviceId);
   const [loadingGps, setLoadingGps] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -81,6 +87,7 @@ export default function DeviceDetail() {
   const [relayProcessing, setRelayProcessing] = useState<boolean[]>([false, false, false, false]);
   const [motorExtended, setMotorExtended] = useState(false);
   const [motorProcessing, setMotorProcessing] = useState(false);
+  const [gpsProcessing, setGpsProcessing] = useState(false);
   const [mapMode, setMapMode] = useState<'view' | 'edit'>('view');
   const [deviceOnlineStatus, setDeviceOnlineStatus] = useState<{online: boolean; lastChecked: number} | null>(null);
 
@@ -98,7 +105,7 @@ export default function DeviceDetail() {
 
   // Listen to RTDB status (set by Cloud Function based on heartbeat)
   useEffect(() => {
-    if (!deviceId) return;
+    if (!deviceId || !user) return;
 
     const statusRef = ref(database, `devices/${deviceId}/status`);
     const unsubscribe = onValue(statusRef, (snapshot) => {
@@ -119,7 +126,7 @@ export default function DeviceDetail() {
   // Listen to relay states from RTDB (stored by Cloud Function)
   // Listens to individual relays so it updates even if not all relays are stored yet
   useEffect(() => {
-    if (!deviceId) return;
+    if (!deviceId || !user) return;
 
     const unsubscribes: (() => void)[] = [];
     
@@ -141,12 +148,12 @@ export default function DeviceDetail() {
     }
 
     return () => unsubscribes.forEach(unsub => unsub());
-  }, [deviceId]);
+  }, [deviceId, user]);
 
   // Fallback: derive relay states from latest commands if /relays is missing
   // This keeps the UI in sync even before verifyLiveCommand populates relays
   useEffect(() => {
-    if (!deviceId) return;
+    if (!deviceId || !user) return;
 
     const commandsRef = ref(database, `devices/${deviceId}/commands/ESP32A`);
     const unsubscribe = onValue(commandsRef, (snapshot) => {
@@ -170,7 +177,7 @@ export default function DeviceDetail() {
     });
 
     return () => unsubscribe();
-  }, [deviceId]);
+  }, [deviceId, user]);
 
   // Load existing boundary coordinates from Firestore
   useEffect(() => {
@@ -231,7 +238,7 @@ export default function DeviceDetail() {
 
   // Real-time RTDB listener for live chart updates
   useEffect(() => {
-    if (!deviceId) return;
+    if (!deviceId || !user) return;
 
     const unsubscribe = onDeviceValue(deviceId, 'npk', (data) => {
       if (!data) return;
@@ -453,17 +460,18 @@ export default function DeviceDetail() {
     }
   };
 
-  // Handle location view
+  // Handle location view - now using GetLocationModal
   const handleViewLocation = async () => {
-    if (!user) return;
+    if (!user || gpsProcessing) return;
 
-    setShowLocationModal(true);
-    setLoadingGps(true);
+    setGpsProcessing(true);
     
     try {
-      // Send GPS read command to ESP32B
+      // Send GPS read command to ESP32B FIRST
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
       const { logUserAction } = await import('@/lib/utils/userActions');
+      
+      console.log('[GPS] Sending command to ESP32B...');
       
       const result = await sendDeviceCommand(
         deviceId,
@@ -477,6 +485,9 @@ export default function DeviceDetail() {
       if (result.success) {
         console.log('✓ GPS read command sent successfully');
         
+        // NOW open the modal after command is confirmed sent
+        setShowGetLocationModal(true);
+        
         // Log successful action
         await logUserAction({
           deviceId,
@@ -486,18 +497,17 @@ export default function DeviceDetail() {
             source: 'device_page'
           }
         });
-        
-        // GPS data will be updated via real-time listener
       } else {
-        console.warn('GPS read command failed:', result.message);
+        console.error('[GPS] Command failed:', result.message);
+        alert('Failed to send GPS command: ' + result.message);
+        setGpsProcessing(false);
       }
     } catch (error) {
-      console.error('Error sending GPS read command:', error);
-    } finally {
-      setLoadingGps(false);
+      console.error('[GPS] Error sending GPS read command:', error);
+      alert('Failed to send GPS command. Please try again.');
+      setGpsProcessing(false);
     }
   };
-
 
 
   // Control Panel Functions
@@ -725,6 +735,8 @@ export default function DeviceDetail() {
       const { logUserAction } = await import('@/lib/utils/userActions');
       const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
       
+      console.log(`[Relay ${relayNum}] Sending command: ${newState ? 'ON' : 'OFF'}`);
+      
       const result = await sendDeviceCommand(
         deviceId,
         'ESP32A', // Relay controller node
@@ -734,18 +746,21 @@ export default function DeviceDetail() {
         user.uid
       );
       
-      if (result.success && result.status === 'completed') {
-        // Update local state only on success
+      console.log(`[Relay ${relayNum}] Command result:`, result);
+      
+      // Command sent successfully (pending execution by ESP32)
+      if (result.success) {
+        // Update local state optimistically
         const newRelayStates = [...relayStates];
         newRelayStates[relayIndex] = newState;
         setRelayStates(newRelayStates);
         
         // Show success feedback
-        const msg = `✓ Relay ${relayNum} turned ${newState ? 'ON' : 'OFF'}`;
-        console.log(msg);
+        console.log(`✓ Relay ${relayNum} command sent - ${newState ? 'ON' : 'OFF'}`);
         
         // Log to both user actions (for Control Panel History) and device actions (for Field logs)
-        await Promise.all([
+        // Logging is optional - don't block on failure
+        Promise.all([
           logUserAction({
             deviceId,
             fieldId: fieldInfo?.id,
@@ -756,7 +771,7 @@ export default function DeviceDetail() {
               result: 'success',
               source: 'device_page'
             }
-          }),
+          }).catch(err => console.warn('Failed to log user action:', err)),
           logDeviceAction({
             deviceId,
             userId: user.uid,
@@ -767,19 +782,17 @@ export default function DeviceDetail() {
             params: { relay: relayNum, state: newState ? 'ON' : 'OFF' },
             result: 'success',
             details: { source: 'device_page' }
-          })
-        ]);
+          }).catch(err => console.warn('Failed to log device action:', err))
+        ]).catch(() => {
+          // Silently ignore logging errors
+        });
+      } else {
+        // Command failed to send
+        console.error('Failed to send relay command:', result.message);
+        alert(`Failed to send Relay ${relayNum} command: ${result.message}`);
         
-        // Optional: Show toast notification instead of alert
-        // For now, we'll skip the alert to avoid blocking UI
-      } else if (result.status === 'timeout') {
-        // Timeout - device may be offline
-        alert(`⏱️ Relay ${relayNum} command timeout. Device may be offline or busy. Please check device status.`);
-        
-        // Log timeout to both locations
-        const { logUserAction } = await import('@/lib/utils/userActions');
-        const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
-        await Promise.all([
+        // Log error (optional - don't await)
+        Promise.all([
           logUserAction({
             deviceId,
             fieldId: fieldInfo?.id,
@@ -787,11 +800,11 @@ export default function DeviceDetail() {
             details: {
               relayNumber: relayNum,
               state: newState ? 'ON' : 'OFF',
-              result: 'timeout',
-              message: 'Device offline or busy',
+              result: 'failed',
+              message: result.message,
               source: 'device_page'
             }
-          }),
+          }).catch(() => {}),
           logDeviceAction({
             deviceId,
             userId: user.uid,
@@ -800,22 +813,17 @@ export default function DeviceDetail() {
             action: `Relay ${relayNum} ${newState ? 'ON' : 'OFF'}`,
             actionType: 'relay',
             params: { relay: relayNum, state: newState ? 'ON' : 'OFF' },
-            result: 'timeout',
-            details: { source: 'device_page', message: 'Device offline or busy' }
-          })
-        ]);
-      } else {
-        // Other error
-        throw new Error(result.message || 'Command failed');
+            result: 'failed',
+            details: { source: 'device_page', message: result.message }
+          }).catch(() => {})
+        ]).catch(() => {});
       }
     } catch (error) {
       console.error('Error toggling relay:', error);
       alert(`Failed to toggle Relay ${relayNum}. ${error instanceof Error ? error.message : 'Please try again.'}`);
       
-      // Log error to both locations
-      const { logUserAction } = await import('@/lib/utils/userActions');
-      const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
-      await Promise.all([
+      // Log error to both locations (optional - don't await)
+      Promise.all([
         logUserAction({
           deviceId,
           fieldId: fieldInfo?.id,
@@ -827,7 +835,7 @@ export default function DeviceDetail() {
             error: error instanceof Error ? error.message : 'Unknown error',
             source: 'device_page'
           }
-        }),
+        }).catch(() => {}),
         logDeviceAction({
           deviceId,
           userId: user.uid,
@@ -839,10 +847,11 @@ export default function DeviceDetail() {
           result: 'failed',
           error: error instanceof Error ? error.message : 'Unknown error',
           details: { source: 'device_page' }
-        })
-      ]);
+        }).catch(() => {})
+      ]).catch(() => {});
     } finally {
-      // Clear processing state with a small delay to ensure UI updates
+      // Always clear processing state
+      console.log(`[Relay ${relayNum}] Clearing loading state`);
       setTimeout(() => {
         const newProcessingStates = [...relayProcessing];
         newProcessingStates[relayIndex] = false;
@@ -1080,6 +1089,7 @@ export default function DeviceDetail() {
             relayProcessing={relayProcessing}
             motorExtended={motorExtended}
             motorProcessing={motorProcessing}
+            gpsProcessing={gpsProcessing}
             onScanNow={handleScanNow}
             onOpenBoundaryMap={() => router.push(`/device/${deviceId}/boundary-map`)}
             onViewLocation={handleViewLocation}
@@ -1415,27 +1425,41 @@ export default function DeviceDetail() {
           </>
         )}
 
+        {/* Get Location Modal - New Component */}
+        {user && (
+          <GetLocationModal
+            isOpen={showGetLocationModal}
+            onClose={() => {
+              setShowGetLocationModal(false);
+              setGpsProcessing(false);
+            }}
+            deviceId={deviceId}
+            fieldId={fieldInfo?.id}
+            userId={user.uid}
+          />
+        )}
+
         {/* Sidebar Menu */}
         <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-          <SheetContent side="right" className="w-80 sm:w-96 bg-gradient-to-br from-green-50 via-white to-emerald-50 border-l border-green-200/50 p-0 flex flex-col">
-            <SheetHeader className="px-6 pt-6 pb-4 border-b border-green-200/50">
-              <SheetTitle className="text-2xl font-bold text-gray-900 ui-heading-mono">
-                PadBuddy
+          <SheetContent side="right" className="w-[280px] sm:w-[320px] bg-gradient-to-br from-green-50 via-white to-emerald-50 border-l border-green-200/50 p-0 flex flex-col">
+            <SheetHeader className="px-5 pt-5 pb-3 border-b border-green-200/50">
+              <SheetTitle className="text-xl font-bold text-gray-800 ui-heading-mono">
+                Menu
               </SheetTitle>
             </SheetHeader>
 
-            <div className="flex-1 flex flex-col min-h-0 px-6 py-4">
+            <div className="flex-1 flex flex-col min-h-0 px-5 py-4">
               {/* User Profile */}
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-green-200/50">
                 {user?.photoURL ? (
                   <img
                     src={user.photoURL}
                     alt={user.displayName || user.email || "User"}
-                    className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
+                    className="w-11 h-11 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
                   />
                 ) : (
-                  <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
-                    <span className="text-primary-foreground font-semibold text-lg">
+                  <div className="w-11 h-11 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
+                    <span className="text-primary-foreground font-semibold text-base">
                       {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
                     </span>
                   </div>
@@ -1446,10 +1470,21 @@ export default function DeviceDetail() {
                   </p>
                   <p className="text-xs text-gray-600">Rice Farmer</p>
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsLogoutModalOpen(true);
+                  }}
+                  className="p-2 rounded-lg hover:bg-red-50 transition-colors group"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="h-5 w-5 text-gray-400 group-hover:text-red-600 transition-colors" />
+                </button>
               </div>
 
               {/* Menu Items */}
-              <nav className="flex-1 py-4 space-y-2 overflow-y-auto min-h-0">
+              <nav className="flex-1 py-4 space-y-1.5 overflow-y-auto min-h-0">
                 <Button
                   variant={pathname === '/' ? "default" : "ghost"}
                   className={`w-full justify-start transition-all duration-200 relative ${
@@ -1463,7 +1498,7 @@ export default function DeviceDetail() {
                   }}
                 >
                   <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                    pathname === '/' ? 'bg-white' : 'bg-transparent'
+                    pathname === '/' ? 'bg-green-300' : 'bg-transparent'
                   }`} />
                   <HomeIcon className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                     pathname === '/' ? 'scale-110' : 'group-hover:scale-110'
@@ -1483,7 +1518,7 @@ export default function DeviceDetail() {
                   }}
                 >
                   <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                    pathname === '/varieties' ? 'bg-white' : 'bg-transparent'
+                    pathname === '/varieties' ? 'bg-green-300' : 'bg-transparent'
                   }`} />
                   <BookOpen className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                     pathname === '/varieties' ? 'scale-110' : 'group-hover:scale-110'
@@ -1504,7 +1539,7 @@ export default function DeviceDetail() {
                     }}
                   >
                     <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                      pathname === '/help' ? 'bg-white' : 'bg-transparent'
+                      pathname === '/help' ? 'bg-green-300' : 'bg-transparent'
                     }`} />
                     <HelpCircle className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                       pathname === '/help' ? 'scale-110' : 'group-hover:scale-110'
@@ -1526,7 +1561,7 @@ export default function DeviceDetail() {
                     }}
                   >
                     <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                      pathname === '/about' ? 'bg-white' : 'bg-transparent'
+                      pathname === '/about' ? 'bg-green-300' : 'bg-transparent'
                     }`} />
                     <Info className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                       pathname === '/about' ? 'scale-110' : 'group-hover:scale-110'
@@ -1534,23 +1569,65 @@ export default function DeviceDetail() {
                     <span className="font-medium">About PadBuddy</span>
                   </Button>
                 )}
-              </nav>
-
-              {/* Sign Out */}
-              <div className="pt-4 border-t border-green-200/50 flex-shrink-0">
+                
+                {/* Divider */}
+                <div className="my-3 border-t border-green-200/50" />
+                
+                {/* Settings */}
                 <Button
-                  type="button"
-                  variant="destructive"
-                  className="w-full bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg active:scale-[0.98]"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsLogoutModalOpen(true);
+                  variant="ghost"
+                  className="w-full justify-start transition-all duration-200 relative hover:bg-white/60 hover:text-gray-900 text-gray-700"
+                  onClick={() => {
+                    // Settings page navigation - to be implemented
+                    setIsMenuOpen(false);
                   }}
                 >
-                  <LogOut className="mr-2 h-5 w-5" />
-                  Sign Out
+                  <Shield className="mr-3 h-5 w-5" />
+                  <span className="font-medium">Settings</span>
                 </Button>
+                
+                {/* Theme Toggle Section */}
+                <div className="mt-4 pt-3 border-t border-green-200/50">
+                  <p className="text-xs font-medium text-gray-500 mb-2 px-3">Theme</p>
+                  <div className="flex items-center justify-center gap-2 px-2">
+                    <button
+                      className="flex-1 p-2.5 rounded-lg hover:bg-white/60 transition-colors group"
+                      aria-label="Light mode"
+                      title="Light mode"
+                    >
+                      <svg className="w-5 h-5 mx-auto text-gray-600 group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="flex-1 p-2.5 rounded-lg hover:bg-white/60 transition-colors group"
+                      aria-label="Dark mode"
+                      title="Dark mode"
+                    >
+                      <svg className="w-5 h-5 mx-auto text-gray-600 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="flex-1 p-2.5 rounded-lg hover:bg-white/60 transition-colors group"
+                      aria-label="System theme"
+                      title="System theme"
+                    >
+                      <svg className="w-5 h-5 mx-auto text-gray-600 group-hover:text-green-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </nav>
+
+              {/* Footer */}
+              <div className="pt-4 pb-2 border-t border-green-200/50 flex-shrink-0">
+                <div className="text-center space-y-1">
+                  <p className="text-xs font-medium text-gray-800">PadBuddy</p>
+                  <p className="text-xs text-gray-500">Smart Rice Farm Management</p>
+                  <p className="text-xs text-gray-400 mt-2">© 2026 All rights reserved</p>
+                </div>
               </div>
             </div>
           </SheetContent>

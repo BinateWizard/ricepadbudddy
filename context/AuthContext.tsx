@@ -28,9 +28,17 @@ export const useAuth = () => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const router = useRouter();
 
+  // Mount guard to prevent SSR/CSR mismatch
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return; // Don't run on server
+    
     // Set a timeout to prevent infinite loading in PWA mode
     const timeout = setTimeout(() => {
       if (loading) {
@@ -50,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribe();
       clearTimeout(timeout);
     };
-  }, [loading]);
+  }, [loading, mounted]);
 
   const signOut = async () => {
     try {
@@ -60,6 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('Error signing out:', error);
     }
   };
+
+  // Don't render children until mounted (prevents SSR mismatch)
+  if (!mounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+      </div>
+    );
+  }
 
   return (
     <AuthContext.Provider value={{ user, loading, signOut }}>

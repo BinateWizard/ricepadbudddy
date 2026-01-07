@@ -11,7 +11,6 @@ import { Menu, Search, HelpCircle, Info, LogOut, Home as HomeIcon, BookOpen, X, 
 import NotificationBell from "@/components/NotificationBell";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import Banner from "@/components/Banner";
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
 import { useAboutContent } from "@/lib/hooks/usePageContent";
 
@@ -44,7 +43,7 @@ export default function AboutPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50">
-        {/* Navigation Bar */}
+        {/* Navigation Bar - Sticky */}
         <nav className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 sticky top-0 z-50 shadow-lg">
           <div className="w-full px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
@@ -77,15 +76,24 @@ export default function AboutPage() {
             </div>
           </div>
         </nav>
+        
+        {/* Page Title Section - Scrollable */}
+        <div className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 rounded-b-3xl pb-6 shadow-lg">
+          <div className="w-full px-6 sm:px-8 lg:px-10 pt-4">
+            <div className="flex items-center gap-4">
+              <div className="h-14 w-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg">
+                <Info className="h-7 w-7 text-white" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-2xl font-bold text-white mb-1">About PadBuddy</h2>
+                <p className="text-white/90 text-sm">Smart rice farming assistant designed for Philippine farmers</p>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Main Content */}
         <div className="w-full px-2 sm:px-4 lg:px-8 py-8">
-          <Banner
-            variant="gradient"
-            title="About PadBuddy"
-            description="Smart rice farming assistant designed for Philippine farmers"
-            icon={<Info className="h-6 w-6" />}
-          />
 
           {/* Mission Statement */}
           <Card className="mt-6 bg-gradient-to-br from-green-50 to-emerald-50 border-0 shadow-md">
@@ -243,32 +251,26 @@ export default function AboutPage() {
           </SheetContent>
         </Sheet>
 
-        {/* Sidebar */}
+        {/* Sidebar Menu */}
         <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-          <SheetContent side="right" className="w-[300px] sm:w-[400px]">
-            <SheetHeader className="relative">
-              <SheetTitle className="text-xl font-bold">Menu</SheetTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsMenuOpen(false)}
-                className="absolute right-0 top-0 h-8 w-8 rounded-full hover:bg-accent transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </Button>
+          <SheetContent side="right" className="w-[280px] sm:w-[320px] bg-gradient-to-br from-green-50 via-white to-emerald-50 border-l border-green-200/50 p-0 flex flex-col">
+            <SheetHeader className="px-5 pt-5 pb-3 border-b border-green-200/50">
+              <SheetTitle className="text-xl font-bold text-gray-800 ui-heading-mono">
+                Menu
+              </SheetTitle>
             </SheetHeader>
-            <div className="flex flex-col h-[calc(100%-4rem)] mt-6">
-              {/* User Info */}
-              <div className="flex items-center gap-3 pb-6 border-b border-green-200/50 animate-fade-in">
+            <div className="flex-1 flex flex-col min-h-0 px-5 py-4">
+              {/* User Profile */}
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-green-200/50">
                 {user?.photoURL ? (
                   <img
                     src={user.photoURL}
                     alt={user.displayName || user.email || "User"}
-                    className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
+                    className="w-11 h-11 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
                   />
                 ) : (
-                  <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
-                    <span className="text-primary-foreground font-semibold text-lg">
+                  <div className="w-11 h-11 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
+                    <span className="text-primary-foreground font-semibold text-base">
                       {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
                     </span>
                   </div>
@@ -279,10 +281,21 @@ export default function AboutPage() {
                   </p>
                   <p className="text-xs text-gray-600">Rice Farmer</p>
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsLogoutModalOpen(true);
+                  }}
+                  className="p-2 rounded-lg hover:bg-red-100 transition-colors group"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="h-5 w-5 text-red-500 group-hover:text-red-700 transition-colors" />
+                </button>
               </div>
 
               {/* Menu Items */}
-              <nav className="flex-1 py-4 space-y-2 overflow-y-auto min-h-0">
+              <nav className="flex-1 py-4 space-y-1.5 overflow-y-auto min-h-0">
                 <Button
                   variant={pathname === '/' ? "default" : "ghost"}
                   className={`w-full justify-start transition-all duration-200 relative ${
@@ -296,7 +309,7 @@ export default function AboutPage() {
                   }}
                 >
                   <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                    pathname === '/' ? 'bg-white' : 'bg-transparent'
+                    pathname === '/' ? 'bg-green-300' : 'bg-transparent'
                   }`} />
                   <HomeIcon className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                     pathname === '/' ? 'scale-110' : 'group-hover:scale-110'
@@ -316,7 +329,7 @@ export default function AboutPage() {
                   }}
                 >
                   <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                    pathname === '/varieties' ? 'bg-white' : 'bg-transparent'
+                    pathname === '/varieties' ? 'bg-green-300' : 'bg-transparent'
                   }`} />
                   <BookOpen className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                     pathname === '/varieties' ? 'scale-110' : 'group-hover:scale-110'
@@ -337,7 +350,7 @@ export default function AboutPage() {
                     }}
                   >
                     <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                      pathname === '/help' ? 'bg-white' : 'bg-transparent'
+                      pathname === '/help' ? 'bg-green-300' : 'bg-transparent'
                     }`} />
                     <HelpCircle className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                       pathname === '/help' ? 'scale-110' : 'group-hover:scale-110'
@@ -359,7 +372,7 @@ export default function AboutPage() {
                     }}
                   >
                     <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
-                      pathname === '/about' ? 'bg-white' : 'bg-transparent'
+                      pathname === '/about' ? 'bg-green-300' : 'bg-transparent'
                     }`} />
                     <Info className={`mr-3 h-5 w-5 transition-transform duration-200 ${
                       pathname === '/about' ? 'scale-110' : 'group-hover:scale-110'
@@ -367,23 +380,65 @@ export default function AboutPage() {
                     <span className="font-medium">About PadBuddy</span>
                   </Button>
                 )}
-              </nav>
-
-              {/* Sign Out */}
-              <div className="pt-4 border-t border-green-200/50 flex-shrink-0">
+                
+                {/* Divider */}
+                <div className="my-3 border-t border-green-200/50" />
+                
+                {/* Settings */}
                 <Button
-                  type="button"
-                  variant="destructive"
-                  className="w-full bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg active:scale-[0.98]"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsLogoutModalOpen(true);
+                  variant="ghost"
+                  className="w-full justify-start transition-all duration-200 relative hover:bg-white/60 hover:text-gray-900 text-gray-700"
+                  onClick={() => {
+                    // Settings page navigation - to be implemented
+                    setIsMenuOpen(false);
                   }}
                 >
-                  <LogOut className="mr-2 h-5 w-5" />
-                  Sign Out
+                  <Shield className="mr-3 h-5 w-5" />
+                  <span className="font-medium">Settings</span>
                 </Button>
+                
+                {/* Theme Toggle Section */}
+                <div className="mt-4 pt-3 border-t border-green-200/50">
+                  <p className="text-xs font-medium text-gray-500 mb-2 px-3">Theme</p>
+                  <div className="flex items-center justify-center gap-2 px-2">
+                    <button
+                      className="flex-1 p-2.5 rounded-lg hover:bg-white/60 transition-colors group"
+                      aria-label="Light mode"
+                      title="Light mode"
+                    >
+                      <svg className="w-5 h-5 mx-auto text-gray-600 group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="flex-1 p-2.5 rounded-lg hover:bg-white/60 transition-colors group"
+                      aria-label="Dark mode"
+                      title="Dark mode"
+                    >
+                      <svg className="w-5 h-5 mx-auto text-gray-600 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="flex-1 p-2.5 rounded-lg hover:bg-white/60 transition-colors group"
+                      aria-label="System theme"
+                      title="System theme"
+                    >
+                      <svg className="w-5 h-5 mx-auto text-gray-600 group-hover:text-green-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </nav>
+
+              {/* Footer */}
+              <div className="pt-4 pb-2 border-t border-green-200/50 flex-shrink-0">
+                <div className="text-center space-y-1">
+                  <p className="text-xs font-medium text-gray-800">PadBuddy</p>
+                  <p className="text-xs text-gray-500">Smart Rice Farm Management</p>
+                  <p className="text-xs text-gray-400 mt-2">© 2026 All rights reserved</p>
+                </div>
               </div>
             </div>
           </SheetContent>

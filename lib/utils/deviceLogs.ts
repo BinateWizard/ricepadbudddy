@@ -21,6 +21,7 @@ export interface DeviceActionLog {
 
 /**
  * Log a device action via Cloud Function
+ * Silently fails if logging is unavailable
  */
 export async function logDeviceAction(log: DeviceActionLog) {
   try {
@@ -29,8 +30,9 @@ export async function logDeviceAction(log: DeviceActionLog) {
     console.log('Device action logged:', result.data);
     return result.data;
   } catch (error) {
-    console.error('Error logging device action:', error);
-    throw error;
+    // Silently fail - logging is not critical
+    console.warn('Device action logging failed (non-critical):', error);
+    return null;
   }
 }
 

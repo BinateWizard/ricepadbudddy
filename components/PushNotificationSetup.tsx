@@ -1,15 +1,20 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { usePushNotifications } from '@/lib/hooks/usePushNotifications';
 
 export default function PushNotificationSetup() {
   const { user } = useAuth();
   const { isSupported, permission, requestPermission } = usePushNotifications();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    if (!user || !isSupported) return;
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || !user || !isSupported) return; // Don't run on server
 
     // Auto-request permission if not yet requested (only once)
     const permissionRequested = localStorage.getItem('notification-permission-requested');
@@ -22,7 +27,7 @@ export default function PushNotificationSetup() {
       // Permission already granted, token will be fetched automatically by the hook
       console.log('Push notifications enabled');
     }
-  }, [user, isSupported, permission, requestPermission]);
+  }, [user, isSupported, permission, requestPermission, mounted]);
 
   // This component doesn't render anything
   return null;

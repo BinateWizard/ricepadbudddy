@@ -1,12 +1,14 @@
 /**
  * Device Command Utilities
  * 
- * Handles sending commands to ESP32 nodes directly to RTDB
- * ESP32 uses stream listeners for instant response
+ * Handles sending commands to ESP32 nodes via Cloud Function
+ * Cloud Function validates, logs, then writes to RTDB
+ * ESP32 polls RTDB for commands
  */
 
-import { database } from '@/lib/firebase';
-import { ref, get, update } from 'firebase/database';
+import { database, functions } from '@/lib/firebase';
+import { ref, get } from 'firebase/database';
+import { httpsCallable } from 'firebase/functions';
 
 export interface DeviceCommand {
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C';
@@ -51,180 +53,44 @@ export async function sendDeviceCommand(
   params: Record<string, any> = {},
   userId: string
 ): Promise<CommandResult> {
-  const now = Date.now();
-  let logId: string | null = null;
-  
   try {
-    // Build command data
-    const commandData: any = {
+    // Call Cloud Function to validate and send command
+    const sendCommand = httpsCallable(functions, 'sendDeviceCommand');
+    const result = await sendCommand({
+      deviceId,
       nodeId,
       role,
       action,
-      status: 'pending',
-      requestedAt: now,
-      requestedBy: userId,
-      source: 'live' // Mark as live command (not scheduled)
-    };
-
-    // Add relay number for relay commands
-    if (role === 'relay' && params.relay) {
-      commandData.relay = params.relay;
-    }
-
-    // Add other params
-    if (Object.keys(params).length > 0) {
-      commandData.params = params;
-    }
-
-    // Write directly to RTDB
-    const deviceRef = ref(database, `devices/${deviceId}`);
-    
-    // Determine command path based on role and node
-    let commandPath: string;
-    if (role === 'relay' && params.relay) {
-      // Relay commands: /commands/ESP32A/relay1, relay2, etc.
-      commandPath = `commands/${nodeId}/relay${params.relay}`;
-    } else if (role === 'motor') {
-      // Motor commands: /commands/ESP32B/motor
-      commandPath = `commands/${nodeId}/motor`;
-    } else if (role === 'gps') {
-      // GPS commands: /commands/ESP32B/gps
-      commandPath = `commands/${nodeId}/gps`;
-    } else if (role === 'npk') {
-      // NPK commands: /commands/ESP32C
-      commandPath = `commands/${nodeId}`;
-    } else {
-      // Default: /commands/{nodeId}
-      commandPath = `commands/${nodeId}`;
-    }
-    
-    await update(deviceRef, {
-      [commandPath]: commandData,
-      [`audit/lastCommand`]: action,
-      [`audit/lastCommandBy`]: userId,
-      [`audit/lastCommandAt`]: now
+      params
     });
 
-    console.log(`[Live Command] Sent to ${deviceId}/${commandPath}: ${action}`, commandData);
+    const data = result.data as any;
+    console.log(`[Live Command] Sent via Cloud Function to ${deviceId}: ${action}`, data);
 
-    // Log command to Firestore for audit trail
-    try {
-      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-      const { db } = await import('@/lib/firebase');
-      const logDoc = await addDoc(collection(db, 'commandLogs'), {
-        deviceId,
-        nodeId,
-        commandType: role,
-        action,
-        source: 'live',
-        status: 'sent',
-        requestedBy: userId,
-        requestedAt: now,
-        sentAt: now,
-        params,
-        timestamp: serverTimestamp()
-      });
-      logId = logDoc.id;
-    } catch (logError) {
-      console.warn('[Live Command] Failed to log command:', logError);
-      // Continue even if logging fails
-    }
-
-    // Wait for ESP32 to complete the command (up to 30 seconds)
-    // This shows "waiting" state in UI
-    const relayPath = (role === 'relay' && params.relay) 
-      ? `relay${params.relay}`
-      : undefined;
-    const completionResult = await waitForCommandComplete(deviceId, nodeId, 30000, relayPath);
-
-    if (completionResult.completed) {
-      // Success - update log
-      if (logId) {
-        try {
-          const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
-          const { db } = await import('@/lib/firebase');
-          await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
-            status: 'completed',
-            completedAt: completionResult.executedAt,
-            updatedAt: serverTimestamp()
-          });
-        } catch (updateError) {
-          console.warn('[Live Command] Failed to update log:', updateError);
-        }
-      }
-      
-      return {
-        success: true,
-        message: `✓ ${role} command "${action}" executed`,
-        status: 'completed',
-        executedAt: completionResult.executedAt
-      };
-    } else if (completionResult.error) {
-      // Error - update log
-      if (logId) {
-        try {
-          const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
-          const { db } = await import('@/lib/firebase');
-          await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
-            status: 'failed',
-            error: completionResult.error,
-            updatedAt: serverTimestamp()
-          });
-        } catch (updateError) {
-          console.warn('[Live Command] Failed to update log:', updateError);
-        }
-      }
-      
+    if (!data.success) {
       return {
         success: false,
-        message: `✗ Command failed: ${completionResult.error}`,
-        status: 'error'
-      };
-    } else {
-      // Timeout - update log
-      // Note: Official "device offline" detection is handled by heartbeat monitor (Functions)
-      // Client just reports timeout
-      if (logId) {
-        try {
-          const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
-          const { db } = await import('@/lib/firebase');
-          await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
-            status: 'timeout',
-            error: 'Device did not respond within 30 seconds',
-            updatedAt: serverTimestamp()
-          });
-        } catch (updateError) {
-          console.warn('[Live Command] Failed to update log:', updateError);
-        }
-      }
-      
-      return {
-        success: false,
-        message: `⏱️ Command timeout - device may be offline or busy`,
-        status: 'timeout'
+        message: data.message || 'Failed to send command'
       };
     }
-  } catch (error) {
+
+    // Return success immediately - command sent to RTDB
+    // ESP32 will poll and execute asynchronously
+    // Use real-time listeners in UI to show completion status
+    return {
+      success: true,
+      message: `✓ Command sent to ${nodeId}`,
+      status: 'pending'
+    };
+  } catch (error: any) {
     console.error('[Live Command] Error sending command:', error);
     
-    // Log error
-    if (logId) {
-      try {
-        const { doc: firestoreDoc, updateDoc, serverTimestamp } = await import('firebase/firestore');
-        const { db } = await import('@/lib/firebase');
-        await updateDoc(firestoreDoc(db, 'commandLogs', logId), {
-          status: 'failed',
-          error: error instanceof Error ? error.message : 'Unknown error',
-          updatedAt: serverTimestamp()
-        });
-      } catch (updateError) {
-        console.warn('[Live Command] Failed to update log:', updateError);
-      }
-    }
+    // Extract error message from Cloud Function error
+    const errorMessage = error?.message || error?.details || 'Unknown error';
     
     return {
       success: false,
-      message: `✗ Failed to send command: ${error instanceof Error ? error.message : 'Unknown error'}`
+      message: `✗ Failed to send command: ${errorMessage}`
     };
   }
 }
@@ -235,21 +101,20 @@ export async function sendDeviceCommand(
  * @param deviceId - Device identifier
  * @param nodeId - Node that should complete the command
  * @param timeout - Maximum time to wait (ms)
+ * @param commandType - Command type (relay1-4, motor, gps, npk)
  */
 async function waitForCommandComplete(
   deviceId: string,
   nodeId: 'ESP32A' | 'ESP32B' | 'ESP32C',
   timeout: number,
-  relayPath?: string
+  commandType: string
 ): Promise<{ completed: boolean; executedAt?: number; error?: string }> {
   const startTime = Date.now();
   const pollInterval = 500; // Check every 500ms
 
   while (Date.now() - startTime < timeout) {
     try {
-      const commandPath = relayPath 
-        ? `devices/${deviceId}/commands/${nodeId}/${relayPath}`
-        : `devices/${deviceId}/commands/${nodeId}`;
+      const commandPath = `devices/${deviceId}/commands/${nodeId}/${commandType}`;
       const commandRef = ref(database, commandPath);
       const snapshot = await get(commandRef);
 
@@ -258,13 +123,13 @@ async function waitForCommandComplete(
         
         // ESP32 sets status to "completed" when done
         if (command.status === 'completed' && command.executedAt) {
-          console.log(`[Command] Completed by ${deviceId}/${nodeId}${relayPath ? '/' + relayPath : ''}`, command);
+          console.log(`[Command] Completed by ${deviceId}/${nodeId}/${commandType}`, command);
           return { completed: true, executedAt: command.executedAt };
         }
         
         // Check for error status
         if (command.status === 'error') {
-          console.error(`[Command] Error from ${deviceId}/${nodeId}${relayPath ? '/' + relayPath : ''}`, command);
+          console.error(`[Command] Error from ${deviceId}/${nodeId}/${commandType}`, command);
           return { completed: false, error: command.error || 'Unknown error' };
         }
       }
@@ -276,7 +141,7 @@ async function waitForCommandComplete(
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
   }
 
-  console.warn(`[Command] Timeout waiting for ${deviceId}/${nodeId}${relayPath ? '/' + relayPath : ''}`);
+  console.warn(`[Command] Timeout waiting for ${deviceId}/${nodeId}/${commandType}`);
   return { completed: false };
 }
 
@@ -285,21 +150,6 @@ async function waitForCommandComplete(
  */
 export const motorCommands = {
   extend: async (
-    deviceId: string,
-    durationMs: number,
-    userId: string
-  ): Promise<CommandResult> => {
-    return sendDeviceCommand(
-      deviceId,
-      'ESP32B',
-      'motor',
-      'extend',
-      { direction: 'extend', duration: durationMs },
-      userId
-    );
-  },
-
-  retract: async (
     deviceId: string,
     durationMs: number,
     userId: string

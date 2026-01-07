@@ -16,15 +16,17 @@ const COMMAND_TIMEOUT = 30 * 1000; // 30 seconds
  * - Logs success/failure to Firestore
  * - Notifies user on failure
  * - Handles timeouts
+ * 
+ * Handles both relay commands (relay1-4) and motor/GPS commands
  */
 export const verifyLiveCommand = functions.database
-  .ref('/devices/{deviceId}/commands/{nodeId}/{relayId}')
+  .ref('/devices/{deviceId}/commands/{nodeId}/{commandType}')
   .onWrite(async (change, context) => {
     const deviceId = context.params.deviceId;
     const nodeId = context.params.nodeId;
-    const relayId = context.params.relayId;
+    const commandType = context.params.commandType; // relay1-4, motor, gps, or npk
     
-    console.log(`[Command Verify] Triggered for ${deviceId}/${nodeId}/${relayId}`);
+    console.log(`[Command Verify] Triggered for ${deviceId}/${nodeId}/${commandType}`);
     
     // Skip if command was deleted
     if (!change.after.exists()) {
@@ -34,7 +36,7 @@ export const verifyLiveCommand = functions.database
     const commandData = change.after.val();
     const previousData = change.before.exists() ? change.before.val() : null;
     
-    console.log(`[Command Verify] Command ${relayId} for device ${deviceId}`);
+    console.log(`[Command Verify] Command ${commandType} for device ${deviceId}`);
     
     try {
       const firestore = admin.firestore();
@@ -60,7 +62,7 @@ export const verifyLiveCommand = functions.database
       if (!statusChanged) {
         // New command created, schedule timeout check
         if (!previousData) {
-          console.log(`[Command Verify] New command ${relayId}, scheduling timeout check`);
+          console.log(`[Command Verify] New command ${commandType}, scheduling timeout check`);
           
           // Schedule a timeout check (using a different approach since we can't delay in this function)
           // The scheduled function checkCommandTimeouts will handle this
@@ -71,28 +73,52 @@ export const verifyLiveCommand = functions.database
       // Status changed - log the result
       // Check if status changed to completed, executed, or failed
       const success = commandData.status === 'completed' || commandData.status === 'executed' || commandData.status === 'acknowledged';
-      const failed = commandData.status === 'failed';
+      const failed = commandData.status === 'failed' || commandData.status === 'error';
       
       if (success || failed) {
+        // Determine the command type (relay, motor, gps, npk)
+        const isRelay = commandType.startsWith('relay');
+        const isMotor = commandType === 'motor';
+        const isGPS = commandType === 'gps';
+        const isNPK = commandType === 'npk' || nodeId === 'ESP32C';
+        
         // Determine the actual state from ESP32 response
-        const relayState = commandData.actualState || (commandData.action === 'on' || commandData.action === 'ON' ? 'ON' : 'OFF');
+        let actualState = commandData.actualState;
+        if (!actualState && isRelay) {
+          actualState = (commandData.action === 'on' || commandData.action === 'ON' ? 'ON' : 'OFF');
+        }
+        
+        // Build command description
+        let commandDescription = commandData.action || 'unknown';
+        if (isRelay && commandData.relay) {
+          commandDescription = `relay${commandData.relay}_${actualState}`;
+        } else if (isMotor) {
+          commandDescription = `motor_${commandData.action}`;
+        } else if (isGPS) {
+          commandDescription = 'gps_read';
+        } else if (isNPK) {
+          commandDescription = 'npk_scan';
+        }
         
         // Log to Firestore (only if device document exists)
         if (deviceDocId) {
           const logData = {
             type: 'live',
-            command: commandData.action || `relay${commandData.relay}_${relayState}`,
+            command: commandDescription,
             requestedState: commandData.action?.toUpperCase() || 'UNKNOWN',
-            actualState: success ? relayState : 'FAILED',
+            actualState: success ? (actualState || 'COMPLETED') : 'FAILED',
             success: success,
             timestamp: Date.now(),
-            commandId: relayId,
+            commandId: commandType,
             functionTriggered: 'verifyLiveCommand',
             userId: deviceData?.ownerId,
             details: {
-              relay: commandData.relay,
+              nodeId: nodeId,
+              commandType: commandType,
+              relay: commandData.relay || null,
               result: commandData.result || null,
-              executedAt: commandData.timestamp
+              error: commandData.error || null,
+              executedAt: commandData.executedAt || commandData.timestamp
             }
           };
 
@@ -102,15 +128,13 @@ export const verifyLiveCommand = functions.database
             .collection('logs')
             .add(logData);
           
-          console.log(`[Command Verify] Logged ${success ? 'SUCCESS' : 'FAILURE'} for ${nodeId}/${relayId}`);
+          console.log(`[Command Verify] Logged ${success ? 'SUCCESS' : 'FAILURE'} for ${nodeId}/${commandType}`);
         } else {
           console.log(`[Command Verify] Skipping Firestore log for ${deviceId} (device document not found)`);
         }
         
-        // Store relay state in RTDB for device recovery on boot
-        console.log(`[Command Verify] Checking relay state storage - success: ${success}, relay: ${commandData.relay}, actualState: ${commandData.actualState}`);
-        
-        if (success && commandData.relay) {
+        // Store relay state in RTDB for device recovery on boot (relay commands only)
+        if (isRelay && success && commandData.relay) {
           const database = admin.database();
           // Use actualState from ESP32 response, or derive from action field
           const relayState = commandData.actualState || (commandData.action === 'on' || commandData.action === 'ON' ? 'ON' : 'OFF');
@@ -126,8 +150,6 @@ export const verifyLiveCommand = functions.database
             });
           
           console.log(`[Command Verify] ✓ Successfully stored relay ${commandData.relay} state: ${relayState} to RTDB`);
-        } else {
-          console.log(`[Command Verify] Skipping relay state storage - success: ${success}, relay: ${commandData.relay}`);
         }
         
         // If failed, notify user
@@ -139,13 +161,14 @@ export const verifyLiveCommand = functions.database
             const userData = userDoc.data();
             const notifications = userData?.notifications || [];
             
+            const errorMessage = commandData.error || commandData.result || 'Unknown error';
             notifications.unshift({
               type: 'commandFailed',
-              message: `Command failed on ${deviceData.name || deviceId}: ${commandData.result || 'Unknown error'}`,
+              message: `Command failed on ${deviceData.name || deviceId}: ${errorMessage}`,
               timestamp: Date.now(),
               read: false,
               deviceId: deviceId,
-              commandId: relayId
+              commandId: commandType
             });
             
             if (notifications.length > 50) {
@@ -159,16 +182,16 @@ export const verifyLiveCommand = functions.database
         }
       }
       
-      return { success: true, commandId: relayId, status: commandData.status };
+      return { success: true, commandId: commandType, status: commandData.status };
       
     } catch (error: any) {
-      console.error(`[Command Verify] Error verifying command ${relayId}:`, error);
+      console.error(`[Command Verify] Error verifying command ${commandType}:`, error);
       
       // Log error to system logs
       await admin.firestore().collection('systemLogs').add({
         functionName: 'verifyLiveCommand',
         deviceId,
-        commandId: relayId,
+        commandId: commandType,
         error: error.message,
         stack: error.stack,
         timestamp: admin.firestore.FieldValue.serverTimestamp()
@@ -213,45 +236,62 @@ export const checkCommandTimeouts = functions.pubsub
           
           const commands = commandsSnap.val();
           
-          for (const [commandId, commandData] of Object.entries(commands) as [string, any][]) {
-            const commandAge = now - (commandData.timestamp || 0);
+          // Iterate through all nodes (ESP32A, ESP32B, ESP32C)
+          for (const [nodeId, nodeCommands] of Object.entries(commands) as [string, any][]) {
+            if (typeof nodeCommands !== 'object') continue;
             
-            // Check if command is still pending and has exceeded timeout
-            if (
-              commandData.status === 'pending' &&
-              commandAge > COMMAND_TIMEOUT
-            ) {
-              console.log(`[Command Timeout] Command ${commandId} timed out (${Math.floor(commandAge / 1000)}s)`);
+            // Iterate through all command types (relay1-4, motor, gps, npk)
+            for (const [commandType, commandData] of Object.entries(nodeCommands) as [string, any][]) {
+              if (typeof commandData !== 'object') continue;
               
-              // Update command status to failed
-              await database.ref(`/devices/${deviceId}/commands/${commandId}`).update({
-                status: 'failed',
-                result: 'Timeout - no response from device'
-              });
+              const commandAge = now - (commandData.requestedAt || commandData.timestamp || 0);
               
-              // Log timeout
-              await firestore
-                .collection('devices')
-                .doc(deviceDoc.id)
-                .collection('logs')
-                .add({
-                  type: 'live',
-                  command: `relay${commandData.relay}_${commandData.requestedState}`,
-                  requestedState: commandData.requestedState,
-                  actualState: 'TIMEOUT',
-                  success: false,
-                  timestamp: Date.now(),
-                  commandId: commandId,
-                  functionTriggered: 'checkCommandTimeouts',
-                  userId: deviceData.ownerId,
-                  details: {
-                    relay: commandData.relay,
-                    reason: 'Command timeout - no device response',
-                    timeoutSeconds: Math.floor(commandAge / 1000)
-                  }
+              // Check if command is still pending and has exceeded timeout
+              if (
+                commandData.status === 'pending' &&
+                commandAge > COMMAND_TIMEOUT
+              ) {
+                console.log(`[Command Timeout] Command ${nodeId}/${commandType} timed out (${Math.floor(commandAge / 1000)}s)`);
+                
+                // Update command status to failed
+                await database.ref(`/devices/${deviceId}/commands/${nodeId}/${commandType}`).update({
+                  status: 'error',
+                  error: 'Timeout - no response from device',
+                  executedAt: now
                 });
-              
-              timedOutCount++;
+                
+                // Determine command description
+                const isRelay = commandType.startsWith('relay');
+                const commandDescription = isRelay 
+                  ? `relay${commandData.relay}_${commandData.action?.toUpperCase() || 'UNKNOWN'}`
+                  : `${commandType}_${commandData.action || 'unknown'}`;
+                
+                // Log timeout
+                await firestore
+                  .collection('devices')
+                  .doc(deviceDoc.id)
+                  .collection('logs')
+                  .add({
+                    type: 'live',
+                    command: commandDescription,
+                    requestedState: commandData.action?.toUpperCase() || 'UNKNOWN',
+                    actualState: 'TIMEOUT',
+                    success: false,
+                    timestamp: Date.now(),
+                    commandId: `${nodeId}/${commandType}`,
+                    functionTriggered: 'checkCommandTimeouts',
+                    userId: deviceData.ownerId,
+                    details: {
+                      nodeId: nodeId,
+                      commandType: commandType,
+                      relay: commandData.relay || null,
+                      reason: 'Command timeout - no device response',
+                      timeoutSeconds: Math.floor(commandAge / 1000)
+                    }
+                  });
+                
+                timedOutCount++;
+              }
             }
           }
           

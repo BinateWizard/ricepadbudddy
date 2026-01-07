@@ -6,8 +6,15 @@ import { WifiOff, Wifi, CloudOff } from 'lucide-react';
 export default function OfflineIndicator() {
   const [isOnline, setIsOnline] = useState(true);
   const [showIndicator, setShowIndicator] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return; // Don't run on server
+    
     // Set initial online status
     setIsOnline(navigator.onLine);
     setShowIndicator(!navigator.onLine);
@@ -34,9 +41,10 @@ export default function OfflineIndicator() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [mounted]);
 
-  if (!showIndicator) return null;
+  // Don't render until mounted
+  if (!mounted || !showIndicator) return null;
 
   return (
     <div
