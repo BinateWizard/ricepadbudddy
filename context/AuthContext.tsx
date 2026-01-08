@@ -69,13 +69,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Don't render children until mounted (prevents SSR mismatch)
+  // Don't render anything until mounted (prevents SSR/hydration mismatch)
   if (!mounted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-      </div>
-    );
+    return null;
   }
 
   return (

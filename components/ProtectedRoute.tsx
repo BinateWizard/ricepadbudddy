@@ -19,15 +19,21 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     }
   }, [mounted, user, loading, router]);
 
-  // Always show loading during SSR to match initial client render
-  if (!mounted || loading) {
+  // Don't render anything until mounted (prevents SSR mismatch)
+  if (!mounted) {
+    return null;
+  }
+
+  // Show loading after mounted
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50" suppressHydrationWarning>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
       </div>
     );
   }
 
+  // Redirect happening, show nothing
   if (!user) {
     return null;
   }

@@ -6,6 +6,7 @@ import { NotificationProvider } from "@/context/NotificationContext";
 import PageLoader from "@/components/PageLoader";
 import OfflineIndicator from "@/components/OfflineIndicator";
 import PushNotificationSetup from "@/components/PushNotificationSetup";
+import ClientOnly from "@/components/ClientOnly";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,15 +51,18 @@ export default function RootLayout({
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning
       >
-        <AuthProvider>
-          <NotificationProvider>
-            <PushNotificationSetup />
-            <OfflineIndicator />
-            <PageLoader />
-            {children}
-          </NotificationProvider>
-        </AuthProvider>
+        <ClientOnly>
+          <AuthProvider>
+            <NotificationProvider>
+              <PushNotificationSetup />
+              <OfflineIndicator />
+              <PageLoader />
+              {children}
+            </NotificationProvider>
+          </AuthProvider>
+        </ClientOnly>
         {enableServiceWorker && (
           <script dangerouslySetInnerHTML={{
             __html: `
