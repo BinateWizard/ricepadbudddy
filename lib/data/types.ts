@@ -38,6 +38,7 @@ export interface VarietyActivity {
   fertilizer?: string;
   notes?: string;
   type?: 'irrigation' | 'fertilization' | 'pest-scouting' | 'observation' | 'harvest';
+  plantingMethod?: 'transplant' | 'direct-seeding' | 'both'; // Filter activities by planting method
 }
 
 export interface RiceVariety {

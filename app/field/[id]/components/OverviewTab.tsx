@@ -69,8 +69,16 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
       }))
     : [];
 
-  // Map ALL variety activities to their stages (no filtering by current stage)
+  // Map ALL variety activities to their stages AND filter by planting method
   const regularActivities = variety.activities
+    .filter(activity => {
+      // Only show activities that match the field's planting method
+      // Activities without plantingMethod field or with 'both' apply to all methods
+      if (!activity.plantingMethod || activity.plantingMethod === 'both') return true;
+      
+      const fieldMethodNormalized = plantingMethod === 'direct-planting' ? 'direct-seeding' : plantingMethod;
+      return activity.plantingMethod === fieldMethodNormalized;
+    })
     .map(activity => {
       const stage = variety.growthStages.find(s => 
         activity.day >= s.startDay && activity.day <= s.endDay

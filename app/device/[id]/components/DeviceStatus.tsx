@@ -54,12 +54,14 @@ export function DeviceStatus({
         
         {gpsData && gpsData.lat && gpsData.lng && (
           <div className="flex justify-between py-2 border-b border-gray-100">
-            <span className="text-gray-600">GPS Location</span>
+            <span className="text-gray-600 flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-blue-600" />
+              GPS Location
+            </span>
             <button
               onClick={onViewLocation}
-              className="flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+              className="text-blue-600 hover:text-blue-700 font-medium hover:underline"
             >
-              <MapPin className="w-4 h-4" />
               View on Map
             </button>
           </div>

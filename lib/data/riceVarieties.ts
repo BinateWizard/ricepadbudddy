@@ -33,7 +33,7 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Harvest Mature', startDay: 130, endDay: 135 }
     ],
     activities: [
-      { day: 0, action: 'Transplant seedlings into paddy', water: 'Keep soil moist, saturated', type: 'observation' },
+      { day: 0, action: 'Transplant seedlings into paddy', water: 'Keep soil moist, saturated', type: 'observation', plantingMethod: 'transplant' },
       { day: 1, action: 'Establish shallow flooding', water: 'Maintain 2–5 cm water depth', type: 'irrigation' },
       { day: 0, action: 'Apply basal fertilizer (14-14-14)', fertilizer: 'Based on soil test', type: 'fertilization', notes: 'Compound fertilizer at transplanting' },
       { day: 7, action: 'Monitor seedling establishment', water: 'Maintain shallow flooding', type: 'observation' },
@@ -93,7 +93,6 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Ripening/Harvest', startDay: 100, endDay: 112 }
     ],
     activities: [
-      { day: 0, action: 'Transplant seedlings or direct-seed', water: 'Keep soil moist', type: 'observation', notes: 'Choose method based on conditions' },
       { day: 0, action: 'Apply basal compound fertilizer', fertilizer: 'Apply 14-14-14 or similar', type: 'fertilization' },
       { day: 1, action: 'Begin shallow flooding', water: 'Maintain 2–5 cm water', type: 'irrigation' },
       { day: 7, action: 'Monitor germination/establishment', water: 'Ensure adequate moisture', type: 'observation' },
@@ -105,8 +104,8 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { day: 80, action: 'Heading stage monitoring', water: 'Maintain adequate water', type: 'observation' },
       { day: 95, action: 'Flowering observation', type: 'observation' },
       { day: 100, action: 'Begin field drainage', water: 'Gradually drain', type: 'irrigation' },
-      { day: 104, action: 'Harvest (direct-seeded)', type: 'harvest', notes: 'Earlier for direct-seeded' },
-      { day: 112, action: 'Harvest (transplanted)', type: 'harvest', notes: 'Suitable for ratooning' }
+      { day: 104, action: 'Harvest (direct-seeded)', type: 'harvest', notes: 'Earlier for direct-seeded', plantingMethod: 'direct-seeding' },
+      { day: 112, action: 'Harvest (transplanted)', type: 'harvest', notes: 'Suitable for ratooning', plantingMethod: 'transplant' }
     ],
     agronomicStats: {
       plantHeightCm: 'medium',
@@ -150,7 +149,6 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Harvest', startDay: 100, endDay: 114 }
     ],
     activities: [
-      { day: 0, action: 'Transplant or direct-seed', water: 'Keep moist', type: 'observation' },
       { day: 0, action: 'Apply basal compound', fertilizer: 'Compound basal', type: 'fertilization' },
       { day: 1, action: 'Establish water level', water: '2–5 cm flooding', type: 'irrigation' },
       { day: 25, action: 'N split at tillering', fertilizer: 'Urea application', type: 'fertilization' },
@@ -160,8 +158,8 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { day: 75, action: 'Heading monitoring', type: 'observation' },
       { day: 90, action: 'Scout for diseases', notes: 'Monitor blast and blight', type: 'pest-scouting' },
       { day: 100, action: 'Begin drainage', water: 'Drain field', type: 'irrigation' },
-      { day: 106, action: 'Harvest (direct-seeded)', type: 'harvest' },
-      { day: 114, action: 'Harvest (transplanted)', type: 'harvest' }
+      { day: 106, action: 'Harvest (direct-seeded)', type: 'harvest', plantingMethod: 'direct-seeding' },
+      { day: 114, action: 'Harvest (transplanted)', type: 'harvest', plantingMethod: 'transplant' }
     ],
     agronomicStats: {
       plantHeightCm: 'medium',
@@ -206,7 +204,7 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Harvest', startDay: 100, endDay: 120 }
     ],
     activities: [
-      { day: 0, action: 'Transplant seedlings', water: 'Saturate soil', type: 'observation' },
+      { day: 0, action: 'Transplant seedlings', water: 'Saturate soil', type: 'observation', plantingMethod: 'transplant' },
       { day: 0, action: 'Apply basal fertilizer', fertilizer: 'Compound basal', type: 'fertilization' },
       { day: 1, action: 'Flood field', water: '2–5 cm', type: 'irrigation' },
       { day: 20, action: 'N split at tillering', fertilizer: 'Urea', type: 'fertilization' },
@@ -308,7 +306,6 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Harvest', startDay: 105, endDay: 115 }
     ],
     activities: [
-      { day: 0, action: 'Plant (transplant or direct-seed)', water: 'Moist soil', type: 'observation' },
       { day: 0, action: 'Basal fertilizer', fertilizer: 'Compound', type: 'fertilization' },
       { day: 1, action: 'Flood field', water: '2–5 cm', type: 'irrigation' },
       { day: 22, action: 'N split at tillering', fertilizer: 'Urea', type: 'fertilization' },
@@ -458,7 +455,7 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Harvest', startDay: 110, endDay: 120 }
     ],
     activities: [
-      { day: 0, action: 'Transplant seedlings', water: 'Saturate', type: 'observation', notes: 'MOET+LCC management' },
+      { day: 0, action: 'Transplant seedlings', water: 'Saturate', type: 'observation', notes: 'MOET+LCC management', plantingMethod: 'transplant' },
       { day: 0, action: 'Basal compound', fertilizer: 'Compound', type: 'fertilization' },
       { day: 1, action: 'Establish flooding', water: '2–5 cm', type: 'irrigation' },
       { day: 25, action: 'First N split', fertilizer: 'Urea at tillering', type: 'fertilization' },
@@ -509,7 +506,6 @@ export const RICE_VARIETIES: RiceVariety[] = [
       { name: 'Harvest', startDay: 100, endDay: 120 }
     ],
     activities: [
-      { day: 0, action: 'Plant (transplant or direct-seed)', water: 'Moist', type: 'observation', notes: 'Promising genotype' },
       { day: 0, action: 'Basal compound', fertilizer: 'Compound', type: 'fertilization' },
       { day: 1, action: 'Establish water', water: '2–5 cm', type: 'irrigation' },
       { day: 25, action: 'N split at tillering', fertilizer: 'Urea', type: 'fertilization' },

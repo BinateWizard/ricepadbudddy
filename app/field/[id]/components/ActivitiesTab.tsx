@@ -56,10 +56,17 @@ export function ActivitiesTab({ field, paddies, deviceReadings = [] }: Activitie
 
   const lookbackDays = 3;
   const regularActivities = variety.activities
-    .filter(activity => 
-      activity.day >= (daysSincePlanting - lookbackDays) && 
-      activity.day <= (currentStage?.endDay || daysSincePlanting + 14)
-    )
+    .filter(activity => {
+      // Filter by time window
+      const inTimeWindow = activity.day >= (daysSincePlanting - lookbackDays) && 
+        activity.day <= (currentStage?.endDay || daysSincePlanting + 14);
+      if (!inTimeWindow) return false;
+      
+      // Filter by planting method
+      if (!activity.plantingMethod || activity.plantingMethod === 'both') return true;
+      const fieldMethodNormalized = plantingMethod === 'direct-planting' ? 'direct-seeding' : plantingMethod;
+      return activity.plantingMethod === fieldMethodNormalized;
+    })
     .map(activity => {
       // Find which stage this activity belongs to
       const stage = variety.growthStages.find(s => 
