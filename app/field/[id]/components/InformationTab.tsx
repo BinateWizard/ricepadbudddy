@@ -12,6 +12,7 @@ import {
 } from '@/lib/utils/stageCalculator';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { BoundaryMappingModal } from './BoundaryMappingModal';
 
 interface InformationTabProps {
   field: any;
@@ -30,10 +31,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
   const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 }); // Default: Philippines
   const [polygonCoords, setPolygonCoords] = useState<{lat: number; lng: number}[]>([]);
   const [isSavingBoundary, setIsSavingBoundary] = useState(false);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [inputLat, setInputLat] = useState('');
-  const [inputLng, setInputLng] = useState('');
-  const [showCoordsForm, setShowCoordsForm] = useState(false);
+  const [deviceBoundaries, setDeviceBoundaries] = useState<{ lat: number; lng: number }[] | null>(null);
   
   if (!field) return null;
 
@@ -42,37 +40,6 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
   const expectedHarvest = variety ? getExpectedHarvestDate(field.startDay, variety) : null;
   const isCompleted = daysSincePlanting >= (variety?.maturityDays?.max || 130);
   const fieldStatus = field.status || 'active';
-
-  // Map canvas ref
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapZoomRef = useRef(18);
-
-  // Handle map click to add points
-  const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!mapContainerRef.current) return;
-
-    const rect = mapContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    // Convert pixel coordinates to lat/lng
-    // Simple mercator projection approximation
-    const width = rect.width;
-    const height = rect.height;
-    
-    const zoom = mapZoomRef.current;
-    const scale = Math.pow(2, zoom);
-    
-    // Convert pixel to tile coordinates
-    const tileX = (mapCenter.lng + 180) / 360 * scale + (x - width / 2) / (256 * scale / 360);
-    const tileY = (90 - mapCenter.lat) / 180 * scale + (y - height / 2) / (256 * scale / 180);
-    
-    const lat = 90 - (tileY / scale) * 180;
-    const lng = (tileX / scale) * 360 - 180;
-
-    handleAddPoint(lat, lng);
-  };
 
   const handleConcludeField = async () => {
     if (!user || !field.id) return;
@@ -174,6 +141,39 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
       setPolygonCoords([]);
     }
     
+    setShowMapBoundaryModal(true);
+    
+    // Load device boundaries from paddies in this field (async, non-blocking)
+    const loadDeviceBoundaries = async () => {
+      if (user && field.id) {
+        try {
+          const paddiesRef = collection(db, `users/${user.uid}/fields/${field.id}/paddies`);
+          const paddiesSnapshot = await getDocs(paddiesRef);
+          
+          // Collect all device boundaries
+          const allDeviceBoundaries: { lat: number; lng: number }[] = [];
+          for (const paddyDoc of paddiesSnapshot.docs) {
+            const paddyData = paddyDoc.data();
+            if (paddyData.boundary && paddyData.boundary.coordinates && Array.isArray(paddyData.boundary.coordinates)) {
+              allDeviceBoundaries.push(...paddyData.boundary.coordinates);
+            }
+          }
+          
+          // If we have device boundaries, use the first one as reference
+          if (allDeviceBoundaries.length >= 3) {
+            setDeviceBoundaries(allDeviceBoundaries);
+          } else {
+            setDeviceBoundaries(null);
+          }
+        } catch (error) {
+          console.error('Error loading device boundaries:', error);
+          setDeviceBoundaries(null);
+        }
+      }
+    };
+    
+    loadDeviceBoundaries();
+    
     // Try to get user's location for map center
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -189,38 +189,10 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
         }
       );
     }
-    
-    setIsDrawing(false);
-    setShowCoordsForm(false);
-    setShowMapBoundaryModal(true);
   };
 
   const handleAddPoint = (lat: number, lng: number) => {
     setPolygonCoords(prev => [...prev, { lat, lng }]);
-  };
-
-  const handleAddCoordinateFromInput = () => {
-    const lat = parseFloat(inputLat);
-    const lng = parseFloat(inputLng);
-    
-    if (isNaN(lat) || isNaN(lng)) {
-      alert('Please enter valid latitude and longitude values');
-      return;
-    }
-    
-    if (lat < -90 || lat > 90) {
-      alert('Latitude must be between -90 and 90');
-      return;
-    }
-    
-    if (lng < -180 || lng > 180) {
-      alert('Longitude must be between -180 and 180');
-      return;
-    }
-    
-    handleAddPoint(lat, lng);
-    setInputLat('');
-    setInputLng('');
   };
 
   const handleRemovePoint = (index: number) => {
@@ -492,6 +464,34 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
         </div>
       </div>
 
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 sm:p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+          🗺️ Field Boundary
+        </h3>
+        <p className="text-sm text-gray-700 mb-4">
+          {field.boundary 
+            ? `Mapped area: ${(field.boundary.area / 10000).toFixed(2)} hectares (${field.boundary.coordinates?.length || 0} points)`
+            : 'Map the physical boundaries of your field for better visualization and area calculation.'}
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={handleOpenMapBoundary}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all"
+          >
+            {field.boundary ? '✏️ Edit Boundary' : '🗺️ Map Field Area'}
+          </button>
+          {field.boundary && (
+            <button
+              onClick={handleRemoveBoundary}
+              disabled={isSavingBoundary}
+              className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-all disabled:bg-gray-400"
+            >
+              Remove Boundary
+            </button>
+          )}
+        </div>
+      </div>
+
       {fieldStatus === 'active' && (
         <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border border-orange-200 rounded-xl p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
@@ -534,34 +534,6 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
         </div>
       )}
 
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 sm:p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          🗺️ Field Boundary
-        </h3>
-        <p className="text-sm text-gray-700 mb-4">
-          {field.boundary 
-            ? `Mapped area: ${(field.boundary.area / 10000).toFixed(2)} hectares (${field.boundary.coordinates?.length || 0} points)`
-            : 'Map the physical boundaries of your field for better visualization and area calculation.'}
-        </p>
-        <div className="flex gap-3">
-          <button
-            onClick={handleOpenMapBoundary}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all"
-          >
-            {field.boundary ? '✏️ Edit Boundary' : '🗺️ Map Field Area'}
-          </button>
-          {field.boundary && (
-            <button
-              onClick={handleRemoveBoundary}
-              disabled={isSavingBoundary}
-              className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-all disabled:bg-gray-400"
-            >
-              Remove Boundary
-            </button>
-          )}
-        </div>
-      </div>
-
       <div className="bg-red-50 border border-red-200 rounded-xl p-4 sm:p-6">
         <h3 className="text-lg font-semibold text-red-900 mb-2">
           🗑️ Delete Field
@@ -578,221 +550,22 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
         </button>
       </div>
 
-      {/* Map Boundary Full Page */}
-      {showMapBoundaryModal && (
-        <div className="fixed inset-0 bg-white z-50 flex flex-col">
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900">Boundary Map</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Tap the map to add points (min 3).
-              </p>
-            </div>
-            <button
-              onClick={() => setShowMapBoundaryModal(false)}
-              disabled={isSavingBoundary}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          
-          {/* Map Area */}
-          <div 
-            ref={mapContainerRef}
-            onClick={handleMapClick}
-            className="flex-1 relative overflow-hidden cursor-crosshair bg-gray-100"
-            style={{
-              backgroundImage: `url('https://maps.googleapis.com/maps/api/staticmap?center=${mapCenter.lat},${mapCenter.lng}&zoom=18&size=1200x800&style=feature:all|element:labels|visibility:off&maptype=roadmap&key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}')`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center'
-            }}
-          >
-            {/* Points overlay */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {/* Draw polyline connecting points */}
-              {polygonCoords.length > 1 && (
-                <polyline
-                  points={polygonCoords.map((coord, idx) => {
-                    // Approximate conversion of lat/lng to pixel coordinates
-                    const x = (coord.lng - mapCenter.lng) * 100 + 50;
-                    const y = (coord.lat - mapCenter.lat) * -100 + 50;
-                    return `${x}%, ${y}%`;
-                  }).join(' ')}
-                  fill="none"
-                  stroke="#3b82f6"
-                  strokeWidth="2"
-                  strokeDasharray="5,5"
-                  opacity="0.7"
-                />
-              )}
-              
-              {/* Draw point markers */}
-              {polygonCoords.map((coord, idx) => {
-                const x = (coord.lng - mapCenter.lng) * 100 + 50;
-                const y = (coord.lat - mapCenter.lat) * -100 + 50;
-                return (
-                  <g key={idx}>
-                    <circle
-                      cx={`${x}%`}
-                      cy={`${y}%`}
-                      r="8"
-                      fill="#3b82f6"
-                      stroke="#1e40af"
-                      strokeWidth="2"
-                      opacity="0.8"
-                    />
-                    <text
-                      x={`${x}%`}
-                      y={`${y}%`}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fill="white"
-                      fontSize="10"
-                      fontWeight="bold"
-                      pointerEvents="none"
-                    >
-                      {idx + 1}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-            
-            {/* Controls Overlay */}
-            <div className="absolute top-6 left-6 bg-white rounded-lg shadow-lg p-3 sm:p-4 max-w-[90%] sm:max-w-md">
-              <div className="mb-4">
-                <p className="text-sm font-medium text-gray-900">
-                  Points: {polygonCoords.length}
-                </p>
-                {polygonCoords.length >= 3 && (
-                  <p className="text-xs text-gray-600">
-                    Area ~{(calculatePolygonArea(polygonCoords) / 10000).toFixed(2)} ha
-                  </p>
-                )}
-              </div>
-              
-              {/* Coordinate Input Toggle + Form */}
-              <div className="space-y-3 mb-4 pb-4 border-b border-gray-200">
-                <button
-                  onClick={() => setShowCoordsForm((v) => !v)}
-                  className="w-full px-3 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg font-medium hover:bg-gray-50"
-                >
-                  {showCoordsForm ? 'Hide Coordinates' : 'Add Coordinates'}
-                </button>
-                {showCoordsForm && (
-                  <>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        placeholder="Latitude"
-                        value={inputLat}
-                        onChange={(e) => setInputLat(e.target.value)}
-                        step="0.0001"
-                        className="flex-1 px-2 py-2 text-sm border border-gray-300 rounded bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                      <input
-                        type="number"
-                        placeholder="Longitude"
-                        value={inputLng}
-                        onChange={(e) => setInputLng(e.target.value)}
-                        step="0.0001"
-                        className="flex-1 px-2 py-2 text-sm border border-gray-300 rounded bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    <button
-                      onClick={handleAddCoordinateFromInput}
-                      disabled={!inputLat || !inputLng}
-                      className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      ➕ Add Point
-                    </button>
-                  </>
-                )}
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {polygonCoords.length > 0 && (
-                  <>
-                    <button
-                      onClick={handleRemoveLastPoint}
-                      disabled={isSavingBoundary}
-                      className="px-3 py-2 text-sm bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium transition-all disabled:bg-gray-400"
-                    >
-                      ↶ Undo Last
-                    </button>
-                    <button
-                      onClick={handleClearPolygon}
-                      disabled={isSavingBoundary}
-                      className="px-3 py-2 text-sm bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-all disabled:bg-gray-400"
-                    >
-                      Clear All
-                    </button>
-                  </>
-                )}
-              </div>
-
-            </div>
-
-            {/* Info Note */}
-            <div className="absolute bottom-6 left-6 right-6 bg-yellow-50 border border-yellow-200 rounded-lg p-3 sm:p-4 max-w-sm">
-              <p className="text-sm text-yellow-800">
-                <strong>Tip:</strong> For precision, add coordinates or use GPS.
-              </p>
-            </div>
-          </div>
-          
-          {/* Footer with Coordinates and Actions */}
-          <div className="px-6 py-4 border-t border-gray-200 bg-white space-y-4">
-            {polygonCoords.length > 0 && (
-              <div className="max-h-40 overflow-y-auto">
-                <p className="font-semibold text-gray-900 mb-2">Points ({polygonCoords.length}):</p>
-                <div className="space-y-2">
-                  {polygonCoords.map((coord, i) => (
-                    <div key={i} className="flex items-center justify-between bg-gray-50 p-3 rounded border border-gray-200">
-                      <div className="flex-1">
-                        <div className="text-sm font-semibold text-gray-900">Point {i + 1}</div>
-                        <div className="text-xs text-gray-600">
-                          <span className="font-mono">{coord.lat.toFixed(6)}</span>
-                          <span className="mx-2">•</span>
-                          <span className="font-mono">{coord.lng.toFixed(6)}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleRemovePoint(i)}
-                        disabled={isSavingBoundary}
-                        className="ml-2 px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded transition-colors disabled:bg-gray-300 disabled:text-gray-500"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowMapBoundaryModal(false)}
-                disabled={isSavingBoundary}
-                className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-semibold transition-colors disabled:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveBoundary}
-                disabled={isSavingBoundary || polygonCoords.length < 3}
-                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-bold shadow-lg transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {isSavingBoundary ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Boundary Mapping Modal */}
+      <BoundaryMappingModal
+        show={showMapBoundaryModal}
+        polygonCoords={polygonCoords}
+        mapCenter={mapCenter}
+        isSavingBoundary={isSavingBoundary}
+        hasSavedBoundary={!!field.boundary}
+        onClose={() => setShowMapBoundaryModal(false)}
+        onAddPoint={handleAddPoint}
+        onRemovePoint={handleRemovePoint}
+        onRemoveLastPoint={handleRemoveLastPoint}
+        onClearPolygon={handleClearPolygon}
+        onSaveBoundary={handleSaveBoundary}
+        calculatePolygonArea={calculatePolygonArea}
+        referencePolygon={deviceBoundaries}
+      />
     </div>
   );
 }

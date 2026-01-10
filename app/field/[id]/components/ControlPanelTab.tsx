@@ -400,12 +400,24 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
 
                       {/* GPS Card */}
                       <div className="p-4 rounded-xl border-2 border-gray-200 bg-white">
-                        <div className="font-semibold mb-2 text-black">GPS Location</div>
+                        <div className="font-semibold mb-2 text-black flex items-center gap-2">
+                          <MapPin className="w-5 h-5 text-blue-600" />
+                          GPS Location
+                        </div>
                         {dev.gps?.lat && dev.gps?.lng ? (
-                          <div className="space-y-1">
-                            <div className="text-xs text-black font-mono">{dev.gps.lat.toFixed(6)}</div>
-                            <div className="text-xs text-black font-mono">{dev.gps.lng.toFixed(6)}</div>
-                            <div className="text-xs text-gray-600 mt-1">Last: {formatTimeAgo(dev.gps?.ts)}</div>
+                          <div className="space-y-2">
+                            <div className="space-y-1">
+                              <div className="text-xs text-black font-mono">{dev.gps.lat.toFixed(6)}</div>
+                              <div className="text-xs text-black font-mono">{dev.gps.lng.toFixed(6)}</div>
+                              <div className="text-xs text-gray-600 mt-1">Last: {formatTimeAgo(dev.gps?.ts)}</div>
+                            </div>
+                            <button
+                              onClick={() => setActiveTab(2)}
+                              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium hover:underline"
+                            >
+                              <MapPin className="w-3 h-3" />
+                              View on Map
+                            </button>
                           </div>
                         ) : (
                           <div className="text-sm text-gray-600">No data</div>
@@ -933,161 +945,131 @@ function ActionRunnerModal({ actionId, onClose, devices, userId }: ActionRunnerM
 }
 
 // LocationControls component
-function LocationControls({ devices }: { devices: Array<{ id: string; label?: string; status?: any; gps?: any; npk?: any }> }) {
-  const [mode, setMode] = useState<'all' | 'select'>('all');
+function LocationControls({ devices }: { devices: Array<{ id: string; label?: string; status?: any; gps?: any; npk?: any; paddyName?: string }> }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [locations, setLocations] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(false);
-  const listeners = useRef<Record<string, (() => void) | null>>({});
+  const [loadingDevices, setLoadingDevices] = useState<Record<string, boolean>>({});
+  const { user } = useAuth();
 
   useEffect(() => {
     const init: Record<string, boolean> = {};
     devices.forEach((d) => (init[d.id] = false));
     setSelected(init);
-
-    return () => {
-      // cleanup listeners on unmount
-      Object.values(listeners.current).forEach((unsub) => unsub && unsub());
-      listeners.current = {};
-    };
   }, [devices]);
 
-  const subscribe = (id: string) => {
-    if (listeners.current[id]) return;
-    const unsub = onDeviceValue(id, 'gps', (val) => {
-      setLocations((prev) => ({ ...prev, [id]: val }));
-    });
-    listeners.current[id] = unsub;
-  };
-
-  const unsubscribe = (id: string) => {
-    const unsub = listeners.current[id];
-    if (unsub) {
-      unsub();
-      delete listeners.current[id];
-    }
-    setLocations((prev) => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-  };
-
   const toggleSelect = (id: string) => {
-    setSelected((s) => {
-      const next = { ...s, [id]: !s[id] };
-      // subscribe/unsubscribe based on selection
-      if (next[id]) subscribe(id); else unsubscribe(id);
-      return next;
-    });
-  };
-
-  const { user } = useAuth();
-
-  // helper: push a log entry via Cloud Function
-  const logAction = async (entry: { deviceId?: string; action: string; details?: any }) => {
-    await logControlAction(entry);
-  };
-
-  // wait for device to acknowledge actionTaken (10s timeout)
-  const waitForAck = (id: string, timeoutMs = 10000) => {
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      const unsub = onDeviceValue(id, 'actionTaken', (val) => {
-        if (val === true && !settled) {
-          settled = true;
-          unsub();
-          resolve(true);
-        }
-      });
-      // timeout
-      const t = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          try { unsub(); } catch {}
-          resolve(false);
-        }
-      }, timeoutMs);
-    });
+    setSelected((s) => ({ ...s, [id]: !s[id] }));
   };
 
   const requestLocationFor = async (id: string) => {
+    setLoadingDevices((prev) => ({ ...prev, [id]: true }));
     try {
-      // Send GPS request to ESP32B (motor controller has GPS)
       const res = await sendDeviceCommand(id, 'ESP32B', 'gps', 'read', {}, user?.uid || '');
-
-      if (res.success) {
-        // Fetch GPS data
-        const gps = await getDeviceGPS(id);
-        setLocations((prev) => ({ ...prev, [id]: gps }));
-        await logAction({ deviceId: id, action: 'location:fetch', details: { success: true, gps } });
-      } else {
-        await logAction({ deviceId: id, action: 'location:fetch', details: { success: false, message: res.message } });
+      
+      try {
+        await logControlAction({
+          deviceId: id,
+          action: 'location:fetch',
+          details: { success: res.success, message: res.message }
+        });
+      } catch (logError) {
+        console.warn('Failed to log control action (non-critical):', logError);
       }
     } catch (e) {
       console.error('requestLocationFor error', e);
-      await logAction({ deviceId: id, action: 'location:fetch', details: { error: String(e) } });
+    } finally {
+      setLoadingDevices((prev) => ({ ...prev, [id]: false }));
     }
   };
 
-  const getAll = async () => {
-    setLoading(true);
-    const ids = devices.map((d) => d.id);
-    await Promise.all(ids.map((id) => requestLocationFor(id)));
-    setLoading(false);
-  };
-
-  const getSelected = async () => {
+  const requestSelected = async () => {
     const ids = Object.keys(selected).filter((id) => selected[id]);
-    if (ids.length === 0) return setLocations({});
-    setLoading(true);
+    if (ids.length === 0) {
+      alert('Please select at least one device.');
+      return;
+    }
     await Promise.all(ids.map((id) => requestLocationFor(id)));
-    setLoading(false);
   };
 
   return (
     <div className="text-black">
-      <div className="mb-4 flex items-center gap-4">
-        <button onClick={() => setMode('all')} className={`py-2 px-4 rounded ${mode === 'all' ? 'bg-green-600 text-white' : 'bg-gray-100 text-black'}`}>
-          Get All Locations
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">Device Locations</h3>
+          <p className="text-sm text-gray-600 mt-1">View GPS coordinates from your devices</p>
+        </div>
+        <button 
+          onClick={requestSelected}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-gray-400"
+        >
+          Fetch Selected
         </button>
-        <button onClick={() => setMode('select')} className={`py-2 px-4 rounded ${mode === 'select' ? 'bg-green-600 text-white' : 'bg-gray-100 text-black'}`}>
-          Choose Devices
-        </button>
-        {mode === 'all' ? (
-          <button onClick={getAll} disabled={loading} className="py-2 px-3 ml-auto rounded bg-blue-600 text-white">Fetch</button>
-        ) : (
-          <button onClick={getSelected} disabled={loading} className="py-2 px-3 ml-auto rounded bg-blue-600 text-white">Fetch Selected</button>
-        )}
       </div>
 
-      {mode === 'select' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-          {devices.map((d) => (
-            <label key={d.id} className="flex items-center gap-2 p-3 rounded bg-gray-50">
-              <input type="checkbox" checked={!!selected[d.id]} onChange={() => toggleSelect(d.id)} />
-              <span className="text-black">{d.id}</span>
-            </label>
-          ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {devices.map((dev) => (
+          <div key={dev.id} className="p-4 border-2 border-gray-200 rounded-xl bg-white hover:border-blue-300 transition-colors">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-3 flex-1">
+                <input
+                  type="checkbox"
+                  checked={!!selected[dev.id]}
+                  onChange={() => toggleSelect(dev.id)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <h4 className="font-semibold text-gray-900">{dev.paddyName || dev.label || dev.id}</h4>
+                  <p className="text-xs text-gray-500 font-mono">{dev.id}</p>
+                </div>
+              </div>
+              <MapPin className="w-5 h-5 text-blue-600 flex-shrink-0" />
+            </div>
+
+            {loadingDevices[dev.id] ? (
+              <div className="flex items-center gap-2 text-sm text-gray-600 py-3">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <span>Requesting location...</span>
+              </div>
+            ) : dev.gps?.lat && dev.gps?.lng ? (
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <div className="text-sm text-gray-700">
+                    <span className="font-medium">Latitude:</span>
+                    <span className="ml-2 font-mono">{dev.gps.lat.toFixed(6)}</span>
+                  </div>
+                  <div className="text-sm text-gray-700">
+                    <span className="font-medium">Longitude:</span>
+                    <span className="ml-2 font-mono">{dev.gps.lng.toFixed(6)}</span>
+                  </div>
+                  {dev.gps.ts && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Last updated: {formatTimeAgo(dev.gps.ts)}
+                    </div>
+                  )}
+                </div>
+                <a
+                  href={`https://www.google.com/maps?q=${dev.gps.lat},${dev.gps.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline"
+                >
+                  <MapPin className="w-4 h-4" />
+                  Open in Google Maps
+                </a>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500 py-3">
+                No GPS data available. Select and fetch to request location.
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {devices.length === 0 && (
+        <div className="text-center py-12 text-gray-500">
+          No devices found in this field.
         </div>
       )}
-
-      <div className="space-y-3">
-        {loading && <div className="text-black">Listening for locations...</div>}
-
-        {Object.keys(locations).length === 0 && !loading && <div className="text-black">No locations received yet.</div>}
-
-        {Object.entries(locations).map(([id, gps]) => {
-          const dev = devices.find((d) => d.id === id);
-          return (
-            <div key={id} className="p-3 rounded bg-white shadow-sm">
-              <div className="font-semibold text-black">{id}</div>
-              <div className="text-sm text-black">{gps?.lat && gps?.lng ? `Lat: ${gps.lat}, Lng: ${gps.lng}` : 'No GPS data'}</div>
-              <div className="text-xs text-black">Last update: {gps?.ts ? formatTimeAgo(gps.ts) : 'Unknown'}</div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
