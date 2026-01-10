@@ -39,40 +39,6 @@ export function SidebarMenu({ isOpen, onClose, onLogout }: SidebarMenuProps) {
         </SheetHeader>
         
         <div className="flex-1 flex flex-col min-h-0 px-5 py-4">
-          {/* User Profile */}
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-green-200/50">
-            {user?.photoURL ? (
-              <img
-                src={user.photoURL}
-                alt={user.displayName || user.email || "User"}
-                className="w-11 h-11 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
-              />
-            ) : (
-              <div className="w-11 h-11 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
-                <span className="text-primary-foreground font-semibold text-base">
-                  {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
-                </span>
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate text-gray-800">
-                {user?.displayName || user?.email?.split('@')[0] || 'User'}
-              </p>
-              <p className="text-xs text-gray-600">Rice Farmer</p>
-            </div>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onLogout();
-              }}
-              className="p-2 rounded-lg hover:bg-red-100 transition-colors group"
-              aria-label="Sign out"
-            >
-              <LogOut className="h-5 w-5 text-red-500 group-hover:text-red-700 transition-colors" />
-            </button>
-          </div>
-
           {/* Menu Items */}
           <nav className="flex-1 py-4 space-y-1.5 overflow-y-auto min-h-0">
             <Button

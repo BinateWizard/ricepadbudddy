@@ -446,29 +446,28 @@ export default function AboutPage() {
 
         {/* Logout Confirmation Modal */}
         <Dialog open={isLogoutModalOpen} onOpenChange={setIsLogoutModalOpen}>
-          <DialogContent className="sm:max-w-md rounded-2xl border-0 shadow-2xl bg-white animate-fade-in">
-            <DialogHeader className="text-center pb-4">
-              <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-md">
-                <LogOut className="h-8 w-8 text-red-600" />
+          <DialogContent className="sm:max-w-md w-[90vw] max-w-[400px] rounded-2xl border-0 shadow-2xl bg-white">
+            <DialogHeader className="text-center pb-3 sm:pb-4">
+              <div className="mx-auto mb-3 sm:mb-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-md">
+                <LogOut className="h-7 w-7 sm:h-8 sm:w-8 text-red-600" />
               </div>
-              <DialogTitle className="text-2xl font-bold text-gray-900">
+              <DialogTitle className="text-xl sm:text-2xl font-bold text-gray-900">
                 Sign Out?
               </DialogTitle>
-              <DialogDescription className="text-base text-gray-600 pt-2 px-2">
+              <DialogDescription className="text-sm sm:text-base text-gray-600 pt-2 px-2">
                 Are you sure you want to sign out? You'll need to sign in again to access your fields.
               </DialogDescription>
             </DialogHeader>
-            <div className="flex flex-row gap-3 pt-4 pb-2">
+            <div className="flex flex-row gap-2 sm:gap-3 pt-3 sm:pt-4 pb-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 onClick={() => setIsLogoutModalOpen(false)}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 font-medium py-3 rounded-xl transition-all active:scale-[0.98] border-0"
+                className="flex-1 h-11 bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium rounded-xl transition-all active:scale-[0.98] border border-gray-200"
                 disabled={isLoggingOut}
               >
-                Cancel
+                <span className="text-sm sm:text-base">Cancel</span>
               </Button>
               <Button
-                variant="destructive"
                 onClick={async () => {
                   setIsLoggingOut(true);
                   try {
@@ -484,7 +483,7 @@ export default function AboutPage() {
                   }
                 }}
                 disabled={isLoggingOut}
-                className="flex-1 bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 active:scale-[0.98]"
+                className="flex-1 h-11 bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 active:scale-[0.98] border-0"
               >
                 {isLoggingOut ? (
                   <span className="flex items-center justify-center gap-2">
@@ -492,12 +491,12 @@ export default function AboutPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Signing out...
+                    <span className="text-sm sm:text-base">Signing out...</span>
                   </span>
                 ) : (
                   <span className="flex items-center justify-center gap-2">
                     <LogOut className="h-4 w-4" />
-                    Sign Out
+                    <span className="text-sm sm:text-base">Sign Out</span>
                   </span>
                 )}
               </Button>

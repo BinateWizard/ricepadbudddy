@@ -142,6 +142,12 @@ export default function DeviceDetail() {
             newStates[i - 1] = state;
             return newStates;
           });
+          // Clear processing state when we receive confirmation from RTDB
+          setRelayProcessing(prev => {
+            const newProcessing = [...prev];
+            newProcessing[i - 1] = false;
+            return newProcessing;
+          });
         }
       });
       unsubscribes.push(unsubscribe);
@@ -152,6 +158,7 @@ export default function DeviceDetail() {
 
   // Fallback: derive relay states from latest commands if /relays is missing
   // This keeps the UI in sync even before verifyLiveCommand populates relays
+  // Also clears processing state on command completion/error
   useEffect(() => {
     if (!deviceId || !user) return;
 
@@ -174,6 +181,62 @@ export default function DeviceDetail() {
 
         return next;
       });
+
+      // Clear processing state when command is completed or errored
+      setRelayProcessing((prev) => {
+        const next = [...prev];
+        for (let i = 1; i <= 4; i++) {
+          const cmd = commands[`relay${i}`];
+          if (!cmd) continue;
+          
+          const status = cmd.status?.toLowerCase();
+          if (status === 'completed' || status === 'executed' || status === 'error' || status === 'failed') {
+            next[i - 1] = false;
+          }
+        }
+        return next;
+      });
+    });
+
+    return () => unsubscribe();
+  }, [deviceId, user]);
+
+  // Listen to ESP32B (motor/GPS) command status from RTDB
+  useEffect(() => {
+    if (!deviceId || !user) return;
+
+    const commandsRef = ref(database, `devices/${deviceId}/commands/ESP32B`);
+    const unsubscribe = onValue(commandsRef, (snapshot) => {
+      const commands = snapshot.val();
+      if (!commands) return;
+
+      // Check motor command status
+      const motorCmd = commands.motor;
+      if (motorCmd) {
+        const status = motorCmd.status?.toLowerCase();
+        if (status === 'completed' || status === 'executed') {
+          // Motor command completed - update state based on actualState
+          const actualState = motorCmd.actualState?.toLowerCase();
+          if (actualState === 'motor_down') {
+            setMotorExtended(true);
+          } else if (actualState === 'motor_up') {
+            setMotorExtended(false);
+          }
+          setMotorProcessing(false);
+        } else if (status === 'error' || status === 'failed') {
+          // Motor command failed - just clear processing
+          setMotorProcessing(false);
+        }
+      }
+
+      // Check GPS command status (just clear processing on complete/error)
+      const gpsCmd = commands.gps;
+      if (gpsCmd) {
+        const status = gpsCmd.status?.toLowerCase();
+        if (status === 'completed' || status === 'executed' || status === 'error' || status === 'failed') {
+          // GPS done - any UI updates happen via the GetLocationModal
+        }
+      }
     });
 
     return () => unsubscribe();
@@ -750,13 +813,12 @@ export default function DeviceDetail() {
       
       // Command sent successfully (pending execution by ESP32)
       if (result.success) {
-        // Update local state optimistically
-        const newRelayStates = [...relayStates];
-        newRelayStates[relayIndex] = newState;
-        setRelayStates(newRelayStates);
+        // DO NOT update state optimistically - let RTDB listener handle it
+        // when ESP32 confirms and Cloud Function writes to /relays/{n}
+        // The UI will update automatically via the onValue listener
         
         // Show success feedback
-        console.log(`✓ Relay ${relayNum} command sent - ${newState ? 'ON' : 'OFF'}`);
+        console.log(`✓ Relay ${relayNum} command sent - waiting for ESP32 confirmation`);
         
         // Log to both user actions (for Control Panel History) and device actions (for Field logs)
         // Logging is optional - don't block on failure
@@ -849,15 +911,28 @@ export default function DeviceDetail() {
           details: { source: 'device_page' }
         }).catch(() => {})
       ]).catch(() => {});
-    } finally {
-      // Always clear processing state
-      console.log(`[Relay ${relayNum}] Clearing loading state`);
-      setTimeout(() => {
-        const newProcessingStates = [...relayProcessing];
-        newProcessingStates[relayIndex] = false;
-        setRelayProcessing(newProcessingStates);
-      }, 100);
+      
+      // On error, immediately clear processing state
+      setRelayProcessing(prev => {
+        const newProcessing = [...prev];
+        newProcessing[relayIndex] = false;
+        return newProcessing;
+      });
     }
+    // Note: On success, processing state is cleared by the RTDB listener
+    // when ESP32 confirms and Cloud Function writes to /relays/{n}
+    // Add a timeout fallback in case ESP32 never responds
+    setTimeout(() => {
+      setRelayProcessing(prev => {
+        if (prev[relayIndex]) {
+          console.log(`[Relay ${relayNum}] Timeout - clearing loading state`);
+          const newProcessing = [...prev];
+          newProcessing[relayIndex] = false;
+          return newProcessing;
+        }
+        return prev;
+      });
+    }, 30000); // 30 second timeout
   };
 
   // Motor control handler
@@ -871,6 +946,7 @@ export default function DeviceDetail() {
     try {
       const { sendDeviceCommand } = await import('@/lib/utils/deviceCommands');
       const { logUserAction } = await import('@/lib/utils/userActions');
+      const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
       
       const result = await sendDeviceCommand(
         deviceId,
@@ -881,24 +957,23 @@ export default function DeviceDetail() {
         user.uid
       );
 
-      if (result.success && result.status === 'completed') {
-        setMotorExtended(!motorExtended);
-        console.log(`✓ Motor moved ${motorAction} successfully`);
+      // Command sent successfully - now wait for ESP32 to confirm via RTDB
+      // Don't update state optimistically - let RTDB listener handle it
+      if (result.success) {
+        console.log(`[Motor] Command ${motorAction} sent - waiting for ESP32 confirmation`);
         
-        // Log successful action to both locations
-        const { logUserAction } = await import('@/lib/utils/userActions');
-        const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
-        await Promise.all([
+        // Log action (don't block on this)
+        Promise.all([
           logUserAction({
             deviceId,
             fieldId: fieldInfo?.id,
             action: `Motor ${motorAction}`,
             details: {
               motorAction,
-              result: 'success',
+              result: 'sent',
               source: 'device_page'
             }
-          }),
+          }).catch(() => {}),
           logDeviceAction({
             deviceId,
             userId: user.uid,
@@ -907,76 +982,33 @@ export default function DeviceDetail() {
             action: `Motor ${motorAction}`,
             actionType: 'motor',
             params: { action: motorAction },
-            result: 'success',
+            result: 'sent',
             details: { source: 'device_page' }
-          })
-        ]);
-      } else if (result.status === 'timeout') {
-        alert(`⏱️ Motor command timeout. Device may be offline.`);
+          }).catch(() => {})
+        ]).catch(() => {});
         
-        // Log timeout to both locations
-        const { logUserAction } = await import('@/lib/utils/userActions');
-        const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
-        await Promise.all([
-          logUserAction({
-            deviceId,
-            fieldId: fieldInfo?.id,
-            action: `Motor ${motorAction}`,
-            details: {
-              motorAction,
-              result: 'timeout',
-              message: 'Device offline',
-              source: 'device_page'
+        // Keep processing state true - RTDB listener or timeout will clear it
+        // Set a timeout to clear processing state if ESP32 doesn't respond
+        setTimeout(() => {
+          setMotorProcessing(prev => {
+            if (prev) {
+              console.log(`[Motor] Timeout - clearing processing state`);
+              return false;
             }
-          }),
-          logDeviceAction({
-            deviceId,
-            userId: user.uid,
-            fieldId: fieldInfo?.id || '',
-            nodeId: 'ESP32B',
-            action: `Motor ${motorAction}`,
-            actionType: 'motor',
-            params: { action: motorAction },
-            result: 'timeout',
-            details: { source: 'device_page', message: 'Device offline' }
-          })
-        ]);
+            return prev;
+          });
+        }, 35000); // 35 second timeout (motor runs 5s + buffer)
+        
+        return; // Don't set motorProcessing to false yet
       } else {
-        throw new Error(result.message || 'Command failed');
+        // Command failed to send
+        console.error('Failed to send motor command:', result.message);
+        alert(`Failed to send motor command: ${result.message}`);
+        setMotorProcessing(false);
       }
     } catch (error) {
       console.error('Error toggling motor:', error);
       alert(`Failed to ${motorAction} motor. ${error instanceof Error ? error.message : 'Please try again.'}`);
-      
-      // Log error to both locations
-      const { logUserAction } = await import('@/lib/utils/userActions');
-      const { logDeviceAction } = await import('@/lib/utils/deviceLogs');
-      await Promise.all([
-        logUserAction({
-          deviceId,
-          fieldId: fieldInfo?.id,
-          action: `Motor ${motorAction}`,
-          details: {
-            motorAction,
-            result: 'error',
-            error: error instanceof Error ? error.message : 'Unknown error',
-            source: 'device_page'
-          }
-        }),
-        logDeviceAction({
-          deviceId,
-          userId: user.uid,
-          fieldId: fieldInfo?.id || '',
-          nodeId: 'ESP32B',
-          action: `Motor ${motorAction}`,
-          actionType: 'motor',
-          params: { action: motorAction },
-          result: 'failed',
-          error: error instanceof Error ? error.message : 'Unknown error',
-          details: { source: 'device_page' }
-        })
-      ]);
-    } finally {
       setMotorProcessing(false);
     }
   };

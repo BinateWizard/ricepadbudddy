@@ -62,10 +62,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
+      console.log('[Auth] Starting sign out process...');
+      
+      // First, clear the user state to trigger cleanup in child components
+      setUser(null);
+      
+      // Wait a brief moment for all Firebase listeners to cleanup
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Now sign out from Firebase
       await auth.signOut();
+      
+      console.log('[Auth] Sign out complete, redirecting...');
       router.push('/auth');
     } catch (error) {
       console.error('Error signing out:', error);
+      // Even if there's an error, try to redirect
+      router.push('/auth');
     }
   };
 

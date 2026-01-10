@@ -137,6 +137,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setNotifications(notificationsData);
       setLoading(false);
     }, (error) => {
+      // Silently handle permission errors after signout
+      if (error.code === 'permission-denied') {
+        console.log('[Notifications] Permission denied (user signed out), cleaning up...');
+        setNotifications([]);
+        setLoading(false);
+        return;
+      }
       console.error('Error fetching notifications:', error);
       setLoading(false);
     });

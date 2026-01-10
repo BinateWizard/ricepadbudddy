@@ -85,8 +85,32 @@ export async function sendDeviceCommand(
   } catch (error: any) {
     console.error('[Live Command] Error sending command:', error);
     
-    // Extract error message from Cloud Function error
-    const errorMessage = error?.message || error?.details || 'Unknown error';
+    // Extract error message from Cloud Function error with better error handling
+    let errorMessage = 'Unknown error';
+    
+    if (error?.code) {
+      errorMessage = error.code;
+    }
+    
+    if (error?.message) {
+      errorMessage = error.message;
+    }
+    
+    if (error?.details) {
+      errorMessage = error.details;
+    }
+    
+    // For Firebase Functions errors, check the error structure
+    if (error?.code === 'internal' || error?.code === 'functions/internal') {
+      errorMessage = 'Cloud function error. Please check the function logs or try again.';
+    }
+    
+    console.error('[Live Command] Detailed error:', {
+      code: error?.code,
+      message: error?.message,
+      details: error?.details,
+      raw: error
+    });
     
     return {
       success: false,

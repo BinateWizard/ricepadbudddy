@@ -40,6 +40,21 @@ export function GetLocationModal({
   const [elapsedTime, setElapsedTime] = useState(0);
   const [commandStartTime, setCommandStartTime] = useState<number>(0);
 
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      console.log('[GetLocationModal] Modal opened - resetting state');
+      setStep('fetching');
+      setGpsData(null);
+      setError(null);
+      setShowViewPrompt(false);
+      setShowSavePrompt(false);
+      setPlotName('');
+      setElapsedTime(0);
+      setCommandStartTime(Date.now());
+    }
+  }, [isOpen]);
+
   // Elapsed time counter
   useEffect(() => {
     if (!isOpen || step !== 'fetching') return;
@@ -56,7 +71,7 @@ export function GetLocationModal({
 
   // Listen for GPS command status and data from ESP32B
   useEffect(() => {
-    if (!isOpen || step !== 'fetching') return;
+    if (!isOpen || step !== 'fetching' || !commandStartTime) return;
 
     const commandPath = `devices/${deviceId}/commands/ESP32B/gps`;
     const gpsPath = `devices/${deviceId}/gps`;
@@ -64,12 +79,13 @@ export function GetLocationModal({
     const gpsRef = ref(database, gpsPath);
 
     let timeoutTimer: NodeJS.Timeout;
+    const modalOpenedAt = commandStartTime;
 
-    console.log('[GetLocationModal] Started listening at:', Date.now());
+    console.log('[GetLocationModal] Started listening at:', modalOpenedAt);
     console.log('[GetLocationModal] Monitoring command:', commandPath);
     console.log('[GetLocationModal] Monitoring GPS:', gpsPath);
 
-    // Monitor GPS data - wait for ANY update after modal opens
+    // Monitor GPS data - wait for updates AFTER modal opens
     const unsubscribeGPS = onValue(gpsRef, (snapshot) => {
       const data = snapshot.val();
       
@@ -80,23 +96,29 @@ export function GetLocationModal({
       
       console.log('[GetLocationModal] GPS data exists:', data);
       
+      // Check if GPS data timestamp is AFTER modal opened (new data)
+      const gpsTime = data.timestamp || data.ts || 0;
+      if (gpsTime < modalOpenedAt - 5000) {
+        console.log('[GetLocationModal] GPS data is from before modal opened, ignoring');
+        return;
+      }
+      
       // Check if GPS data contains an error from ESP32B
       if (data.status === 'error') {
-        console.log('[GetLocationModal] GPS error from device:', data.message);
-        setError(data.message || data.reason || 'GPS signal unavailable');
+        console.log('[GetLocationModal] GPS error from device - no signal');
+        setError('GPS fix timeout - device cannot acquire satellite signal');
         setStep('received');
         clearTimeout(timeoutTimer);
         return;
       }
       
-      // Check if we have valid GPS coordinates
-      if (data.lat && data.lng && data.lat !== 0 && data.lng !== 0) {
-        const gpsTime = data.timestamp || data.ts || 0;
+      // Check if we have valid GPS coordinates and status is ok
+      if (data.status === 'ok' && data.lat && data.lng && data.lat !== 0 && data.lng !== 0) {
         const age = Date.now() - gpsTime;
         
         console.log('[GetLocationModal] GPS data age:', age, 'ms');
         
-        // Accept GPS data that's less than 3 minutes old
+        // Accept GPS data that's fresh (less than 3 minutes old)
         if (age < 180000) {
           console.log('[GetLocationModal] Valid GPS coordinates found');
           setGpsData({
@@ -116,17 +138,27 @@ export function GetLocationModal({
       }
     });
 
-    // Monitor command for errors only
+    // Monitor command for errors - only react to commands created after modal opened
     const unsubscribeCommand = onValue(commandRef, (snapshot) => {
       const cmd = snapshot.val();
       if (!cmd) return;
       
-      console.log('[GetLocationModal] Command status:', cmd.status);
+      // Only react to commands created after modal opened
+      const cmdTime = cmd.requestedAt || 0;
+      if (cmdTime < modalOpenedAt - 5000) {
+        console.log('[GetLocationModal] Command is from before modal opened, ignoring status:', cmd.status);
+        return;
+      }
+      
+      console.log('[GetLocationModal] Command status:', cmd.status, 'requestedAt:', cmdTime);
       
       if (cmd.status === 'error') {
         setError(cmd.error || 'GPS command failed on device');
         setStep('received');
         clearTimeout(timeoutTimer);
+      } else if (cmd.status === 'completed') {
+        // Command completed - GPS data should be available
+        console.log('[GetLocationModal] Command completed, waiting for GPS data');
       }
     });
 
@@ -158,7 +190,7 @@ export function GetLocationModal({
       off(gpsRef);
       clearTimeout(timeoutTimer);
     };
-  }, [isOpen, deviceId, step]);
+  }, [isOpen, deviceId, step, commandStartTime]);
 
   const handleViewLocation = () => {
     setShowViewPrompt(false);

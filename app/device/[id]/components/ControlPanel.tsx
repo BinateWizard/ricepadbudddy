@@ -1,5 +1,6 @@
 import React from 'react';
 import { Scan, Map, MapPin, Power, Loader2 } from 'lucide-react';
+import { formatTimeAgo } from '@/lib/utils';
 
 interface ControlPanelProps {
   isScanning: boolean;
@@ -295,9 +296,12 @@ export function ControlPanel(props: ControlPanelProps) {
                 )}
               </button>
               {gpsData && gpsData.lat && gpsData.lng && (
-                <p className="text-xs text-gray-500 mt-2 text-center">
-                  Last: {gpsData.lat.toFixed(4)}, {gpsData.lng.toFixed(4)}
-                </p>
+                <div className="text-xs text-gray-500 mt-2 text-center">
+                  <div>Last: {gpsData.lat.toFixed(4)}, {gpsData.lng.toFixed(4)}</div>
+                  {gpsData.timestamp && (
+                    <div className="text-gray-400 mt-0.5">{formatTimeAgo(gpsData.timestamp)}</div>
+                  )}
+                </div>
               )}
             </div>
           </div>

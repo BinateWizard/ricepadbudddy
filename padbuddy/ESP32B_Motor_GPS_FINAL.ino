@@ -63,6 +63,11 @@ unsigned long long nowTS() {
            : millis();
 }
 
+void printTimestamp() {
+  unsigned long long ts = nowTS();
+  Serial.printf("[%llu] ", ts);
+}
+
 bool sendPATCH(const String& path, const String& payload) {
   if (!wifiConnected) return false;
   HTTPClient http;
@@ -86,6 +91,17 @@ bool sendPUTInt64(const String& path, unsigned long long value) {
   return code == 200 || code == 204;
 }
 
+bool sendPUTJson(const String& path, const String& payload) {
+  if (!wifiConnected) return false;
+  HTTPClient http;
+  http.setTimeout(5000);
+  http.begin(String(DATABASE_URL) + path + ".json?auth=" + DATABASE_SECRET);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.PUT(payload);
+  http.end();
+  return code == 200 || code == 204;
+}
+
 // ================= WIFI =================
 void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
@@ -100,7 +116,8 @@ void connectWiFi() {
   lastWiFiAttempt = millis();
   wifiConnected = false;
 
-  Serial.println("\n[WiFi] Attempting connection...");
+  printTimestamp();
+  Serial.println("[WiFi] Attempting connection...");
   
   WiFi.disconnect(true);
   delay(1000);
@@ -121,7 +138,8 @@ void connectWiFi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
-    Serial.println("\n[WiFi] CONNECTED");
+    printTimestamp();
+    Serial.println("[WiFi] CONNECTED");
     Serial.print("[WiFi] IP: ");
     Serial.println(WiFi.localIP());
     Serial.print("[WiFi] RSSI: ");
@@ -129,7 +147,8 @@ void connectWiFi() {
     Serial.println(" dBm");
   } else {
     wifiConnected = false;
-    Serial.println("\n[WiFi] FAILED - Will retry in 30s");
+    printTimestamp();
+    Serial.println("[WiFi] FAILED - Will retry in 30s");
     WiFi.disconnect(true);
   }
 }
@@ -139,6 +158,7 @@ void moveDown() {
   digitalWrite(IN1, HIGH); 
   digitalWrite(IN2, LOW); 
   digitalWrite(ENA, HIGH);
+  printTimestamp();
   Serial.println("[Motor] Moving DOWN");
 }
 
@@ -146,11 +166,13 @@ void moveUp() {
   digitalWrite(IN1, LOW);  
   digitalWrite(IN2, HIGH); 
   digitalWrite(ENA, HIGH);
+  printTimestamp();
   Serial.println("[Motor] Moving UP");
 }
 
 void stopMotor() { 
   digitalWrite(ENA, LOW);
+  printTimestamp();
   Serial.println("[Motor] STOP");
 }
 
@@ -162,6 +184,7 @@ void sendHeartbeat() {
   unsigned long long currentTimeMs = nowTS();
   String path = "/devices/" DEVICE_ID "/heartbeat";
   if (sendPUTInt64(path, currentTimeMs)) {
+    printTimestamp();
     Serial.printf("[HB] Sent: %llu\n", currentTimeMs);
   }
 
@@ -202,6 +225,7 @@ void checkMotorCommand() {
   lastMotorTS = requestedAt;
 
   String action = doc["action"] | "";
+  printTimestamp();
   Serial.println("[Motor] Action: " + action);
 
   // ACKNOWLEDGE
@@ -226,6 +250,7 @@ void checkMotorCommand() {
   String donePayload;
   serializeJson(done, donePayload);
   sendPATCH(path, donePayload);
+  printTimestamp();
   Serial.println("[Motor] Command completed");
 }
 
@@ -264,6 +289,7 @@ void checkGPSCommand() {
   if (requestedAt == lastGPSTS) return;
   lastGPSTS = requestedAt;
 
+  printTimestamp();
   Serial.println("[GPS] Command received - acquiring fix...");
 
   // ACKNOWLEDGE
@@ -289,6 +315,7 @@ void checkGPSCommand() {
 
   if (fix) {
     // PUBLISH GPS DATA
+    printTimestamp();
     Serial.print("[GPS] Fix acquired: ");
     Serial.print(gps.location.lat(), 6);
     Serial.print(", ");
@@ -301,7 +328,7 @@ void checkGPSCommand() {
     gpsData["timestamp"] = nowTS();
     String gpsPayload;
     serializeJson(gpsData, gpsPayload);
-    sendPATCH(gpsPath, gpsPayload);
+    sendPUTJson(gpsPath, gpsPayload);
 
     // MARK COMMAND COMPLETED
     StaticJsonDocument<256> done;
@@ -310,19 +337,19 @@ void checkGPSCommand() {
     String donePayload;
     serializeJson(done, donePayload);
     sendPATCH(cmdPath, donePayload);
+    printTimestamp();
     Serial.println("[GPS] Command completed");
   } else {
-    // PUBLISH GPS ERROR
+    // PUBLISH GPS ERROR - Clear stale coordinates
+    printTimestamp();
     Serial.println("[GPS] Fix timeout - no signal");
     
     StaticJsonDocument<256> gpsError;
     gpsError["status"] = "error";
-    gpsError["message"] = "GPS fix timeout";
-    gpsError["reason"] = "No valid GPS signal";
     gpsError["timestamp"] = nowTS();
     String errorPayload;
     serializeJson(gpsError, errorPayload);
-    sendPATCH(gpsPath, errorPayload);
+    sendPUTJson(gpsPath, errorPayload);
 
     // MARK COMMAND AS ERROR
     StaticJsonDocument<256> cmdError;
@@ -332,6 +359,7 @@ void checkGPSCommand() {
     String cmdErrorPayload;
     serializeJson(cmdError, cmdErrorPayload);
     sendPATCH(cmdPath, cmdErrorPayload);
+    printTimestamp();
     Serial.println("[GPS] Command failed - error published");
   }
 }

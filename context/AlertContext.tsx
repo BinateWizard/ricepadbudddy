@@ -127,7 +127,14 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
             setIsLoading(false);
             setError(null);
           },
-          (err) => {
+          (err: any) => {
+            // Silently handle permission errors after signout
+            if (err.code === 'permission-denied') {
+              console.log('[Alerts] Permission denied (user signed out), cleaning up...');
+              setAlerts([]);
+              setIsLoading(false);
+              return;
+            }
             console.error(`Error listening to alerts for field ${fieldId}:`, err);
             setError('Failed to load alerts');
             setIsLoading(false);

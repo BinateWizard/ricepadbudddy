@@ -871,7 +871,21 @@ html {
 
 @media (max-width: 768px) {
   html {
-    font-size: 14px;
+    font-size: 14px; /* tablets and large phones */
+  }
+}
+
+/* Extra-compact scaling for small phones */
+@media (max-width: 640px) {
+  html {
+    font-size: 13px;
+  }
+}
+
+/* Ultra-compact scaling for very small screens */
+@media (max-width: 400px) {
+  html {
+    font-size: 12px;
   }
 }
 
@@ -911,8 +925,8 @@ html {
 @media (hover: none) and (pointer: coarse) {
   /* Mobile: larger touch targets, no hover */
   .ui-touch-target {
-    min-height: 48px;
-    min-width: 48px;
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 
@@ -926,3 +940,28 @@ video {
 /* ============================================
    END UI DESIGN SYSTEM
    ============================================ */
+
+/* Compact spacing scale for small devices (applies project-wide via CSS variables) */
+@media (max-width: 640px) {
+  :root {
+    --space-xs: 0.2rem;
+    --space-sm: 0.4rem;
+    --space-md: 0.8rem;
+    --space-lg: 1.2rem;
+    --space-xl: 1.6rem;
+    --space-2xl: 2.4rem;
+    --space-3xl: 3.2rem;
+  }
+}
+
+@media (max-width: 400px) {
+  :root {
+    --space-xs: 0.18rem;
+    --space-sm: 0.36rem;
+    --space-md: 0.72rem;
+    --space-lg: 1.1rem;
+    --space-xl: 1.5rem;
+    --space-2xl: 2.2rem;
+    --space-3xl: 3rem;
+  }
+}

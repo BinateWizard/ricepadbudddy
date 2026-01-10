@@ -1,8 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import dynamic from 'next/dynamic';
-import type { Map as LeafletMap } from 'leaflet';
 
 // Import Leaflet CSS
 import 'leaflet/dist/leaflet.css';
@@ -18,27 +16,8 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Dynamic import to avoid SSR issues with Leaflet
-const MapContainer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.MapContainer),
-  { ssr: false }
-);
-const TileLayer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.TileLayer),
-  { ssr: false }
-);
-const Polygon = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Polygon),
-  { ssr: false }
-);
-const Marker = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Marker),
-  { ssr: false }
-);
-const Popup = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Popup),
-  { ssr: false }
-);
+// We will render the map using Leaflet directly to avoid
+// potential compatibility issues with React 19 + react-leaflet.
 
 interface BoundaryMappingModalProps {
   show: boolean;
@@ -90,75 +69,16 @@ export function BoundaryMappingModal({
   const [isLocating, setIsLocating] = useState(true);
   const [isMapReady, setIsMapReady] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const mapRef = useRef<LeafletMap | null>(null);
+  const mapRef = useRef<any | null>(null);
+  const mapDivRef = useRef<HTMLDivElement | null>(null);
+  const overlayGroupRef = useRef<any | null>(null);
+  const mapClickHandlerRef = useRef<any | null>(null);
 
   // Ensure we're on client side
   useEffect(() => {
     setIsMounted(true);
     setIsMapReady(true);
   }, []);
-
-  // Map center controller - imperatively moves map when center changes
-  const MapCenterController = dynamic(
-    () => import('react-leaflet').then((mod) => {
-      const { useMap } = mod;
-      return ({ center }: { center: { lat: number; lng: number } }) => {
-        const map = useMap();
-
-        React.useEffect(() => {
-          if (center) {
-            map.setView([center.lat, center.lng], DEFAULT_ZOOM, {
-              animate: true,
-            });
-          }
-        }, [center.lat, center.lng, map]);
-
-        return null;
-      };
-    }),
-    { ssr: false }
-  );
-
-  // Map click handler component (must be inside the modal to access state)
-  const MapClickHandler = dynamic(
-    () => import('react-leaflet').then((mod) => {
-      const { useMapEvents } = mod;
-      return () => {
-        useMapEvents({
-          click(e: any) {
-            if (isLocked || mapMode !== 'edit') return;
-            
-            const { lat, lng } = e.latlng;
-            
-            // Check maximum points limit
-            if (polygonCoords.length >= MAX_POINTS) {
-              setValidationError(`Maximum ${MAX_POINTS} points allowed`);
-              return;
-            }
-
-            // Check for duplicate/too close points
-            if (isPointTooClose(lat, lng)) {
-              setValidationError(`Point too close to existing point (min ${MIN_POINT_DISTANCE_METERS}m apart)`);
-              return;
-            }
-
-            // Check for self-intersection
-            if (wouldCreateSelfIntersection(lat, lng)) {
-              setValidationError('This point would create a self-intersecting boundary');
-              return;
-            }
-
-            // Apply snapping and add point directly
-            const snapped = snapPoint(lat, lng);
-            onAddPoint(snapped.lat, snapped.lng);
-            setValidationError(null);
-          },
-        });
-        return null;
-      };
-    }),
-    { ssr: false }
-  );
 
   // Request device geolocation on mount
   useEffect(() => {
@@ -195,6 +115,118 @@ export function BoundaryMappingModal({
       setIsLocating(false);
     }
   }, [show, mapCenter, isMounted]);
+
+  // Initialize map when ready
+  useEffect(() => {
+    if (!show || !isMounted || !currentCenter || !mapDivRef.current || mapRef.current) return;
+
+    console.log('🗺️ Initializing Leaflet map...');
+    
+    const L = require('leaflet');
+    
+    const map = L.map(mapDivRef.current, {
+      zoomControl: true,
+    }).setView([currentCenter.lat, currentCenter.lng], DEFAULT_ZOOM);
+
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri',
+        maxZoom: MAX_ZOOM,
+      }
+    ).addTo(map);
+
+    overlayGroupRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    
+    console.log('✅ Map initialized successfully');
+  }, [show, isMounted, currentCenter]);
+
+  // Update click handler when mapMode or polygonCoords changes
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const map = mapRef.current;
+
+    // Remove old handler
+    if (mapClickHandlerRef.current) {
+      map.off('click', mapClickHandlerRef.current);
+    }
+
+    // Add new handler
+    const clickHandler = (e: any) => {
+      if (mapMode !== 'edit') return;
+      const { lat, lng } = e.latlng;
+
+      console.log('Map clicked in edit mode:', lat, lng);
+
+      if (polygonCoords.length >= MAX_POINTS) {
+        setValidationError(`Maximum ${MAX_POINTS} points allowed`);
+        return;
+      }
+      if (isPointTooClose(lat, lng)) {
+        setValidationError(`Point too close to existing point (min ${MIN_POINT_DISTANCE_METERS}m apart)`);
+        return;
+      }
+      if (wouldCreateSelfIntersection(lat, lng)) {
+        setValidationError('This point would create a self-intersecting boundary');
+        return;
+      }
+      const snapped = snapPoint(lat, lng);
+      onAddPoint(snapped.lat, snapped.lng);
+      setValidationError(null);
+    };
+
+    map.on('click', clickHandler);
+    mapClickHandlerRef.current = clickHandler;
+
+    return () => {
+      if (mapClickHandlerRef.current) {
+        map.off('click', mapClickHandlerRef.current);
+      }
+    };
+  }, [mapMode, polygonCoords, onAddPoint]);
+
+  // Render markers and polygon whenever polygonCoords changes
+  useEffect(() => {
+    if (!mapRef.current || !overlayGroupRef.current) return;
+    
+    const L = require('leaflet');
+    const group = overlayGroupRef.current;
+    group.clearLayers();
+
+    // Current location marker
+    if (currentCenter) {
+      L.circleMarker([currentCenter.lat, currentCenter.lng], {
+        radius: 10,
+        color: '#3b82f6',
+        fillColor: '#3b82f6',
+        fillOpacity: 0.6,
+        weight: 3,
+      }).addTo(group);
+    }
+
+    // Point markers
+    polygonCoords.forEach((coord) => {
+      L.circleMarker([coord.lat, coord.lng], {
+        radius: 8,
+        color: '#ef4444',
+        fillColor: '#ef4444',
+        fillOpacity: 0.8,
+        weight: 2,
+      }).addTo(group);
+    });
+
+    // Polygon
+    if (polygonCoords.length >= 3) {
+      L.polygon(polygonCoords.map((c) => [c.lat, c.lng]), {
+        color: '#3b82f6',
+        fillColor: '#3b82f6',
+        fillOpacity: 0.2,
+        weight: 3,
+      }).addTo(group);
+    }
+  }, [polygonCoords, currentCenter]);
 
   if (!show) return null;
   
@@ -324,8 +356,6 @@ export function BoundaryMappingModal({
 
   // Stack-based point removal: only allow removing the last point
   const handleRemovePoint = (index: number) => {
-    if (isLocked) return;
-    
     if (index !== polygonCoords.length - 1) {
       setValidationError('You can only remove the most recent point. Use "Undo" to remove the last point.');
       return;
@@ -342,14 +372,6 @@ export function BoundaryMappingModal({
     setMapMode('view');
   };
 
-  // Unlock boundary for editing
-  const handleUnlockBoundary = () => {
-    if (confirm('Are you sure you want to unlock and edit the saved boundary? This will allow modifications.')) {
-      setIsLocked(false);
-      setMapMode('edit');
-    }
-  };
-
   // Convert index to letter (0 = A, 1 = B, 2 = C, etc.)
   const getPointLabel = (index: number): string => {
     return String.fromCharCode(65 + index);
@@ -357,8 +379,8 @@ export function BoundaryMappingModal({
 
   return (
     <div className="h-screen flex flex-col bg-white">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+      {/* Header - Desktop */}
+      <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-4 flex-1">
           <button
             onClick={() => {
@@ -400,16 +422,69 @@ export function BoundaryMappingModal({
             👁️ View
           </button>
           <button
-            onClick={() => isLocked ? handleUnlockBoundary() : setMapMode('edit')}
+            onClick={() => {
+              if (polygonCoords.length > 0) {
+                if (confirm('You have existing points. Do you want to clear them and start fresh?')) {
+                  onClearPolygon();
+                }
+              }
+              setMapMode('edit');
+              if (isLocked) {
+                setIsLocked(false);
+              }
+            }}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
               mapMode === 'edit'
                 ? 'bg-green-600 text-white'
-                : isLocked
-                ? 'bg-gray-300 text-gray-600'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
-            {isLocked ? '🔓 Unlock' : '✏️ Edit'}
+            ✏️ Edit
+          </button>
+        </div>
+      </div>
+
+      {/* Header - Mobile */}
+      <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-white">
+        <button
+          onClick={() => {
+            onClose();
+            setMapMode('view');
+          }}
+          disabled={isSavingBoundary}
+          className="text-gray-400 hover:text-gray-600"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        </button>
+        <h2 className="text-base font-bold text-gray-900">Boundary</h2>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setMapMode('view')}
+            className={`px-2 py-1 rounded text-xs font-medium ${
+              mapMode === 'view' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'
+            }`}
+          >
+            View
+          </button>
+          <button
+            onClick={() => {
+              if (polygonCoords.length > 0) {
+                if (confirm('You have existing points. Do you want to clear them and start fresh?')) {
+                  onClearPolygon();
+                }
+              }
+              setMapMode('edit');
+              if (isLocked) {
+                setIsLocked(false);
+              }
+            }}
+            className={`px-2 py-1 rounded text-xs font-medium ${
+              mapMode === 'edit' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'
+            }`}
+          >
+            Edit
           </button>
         </div>
       </div>
@@ -446,98 +521,27 @@ export function BoundaryMappingModal({
             </div>
           </div>
         ) : (
-          <MapContainer
-            center={[currentCenter.lat, currentCenter.lng]}
-            zoom={DEFAULT_ZOOM}
-            maxZoom={MAX_ZOOM}
-            style={{ height: '100%', width: '100%' }}
-            ref={mapRef}
-          >
-            {/* Esri World Imagery - Satellite view */}
-            <TileLayer
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution='&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-              maxZoom={MAX_ZOOM}
-            />
-            
-            {/* Map click handler */}
-            <MapClickHandler />
-            
-            {/* Current location marker */}
-            {currentCenter && (() => {
-              const CircleMarker = require('react-leaflet').CircleMarker;
-              return (
-                <CircleMarker
-                  center={[currentCenter.lat, currentCenter.lng]}
-                  radius={10}
-                  pathOptions={{
-                    color: '#3b82f6',
-                    fillColor: '#3b82f6',
-                    fillOpacity: 0.6,
-                    weight: 3
-                  }}
-                >
-                  <Popup>
-                    <div className="text-xs">
-                      <strong>📍 Your Location</strong><br />
-                      {currentCenter.lat.toFixed(6)}, {currentCenter.lng.toFixed(6)}
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              );
-            })()}
-            
-            {/* Render circle markers for each point */}
-            {polygonCoords.map((coord, idx) => {
-              const CircleMarker = require('react-leaflet').CircleMarker;
-              return (
-                <CircleMarker
-                  key={`marker-${idx}`}
-                  center={[coord.lat, coord.lng]}
-                  radius={8}
-                  pathOptions={{
-                    color: '#ef4444',
-                    fillColor: '#ef4444',
-                    fillOpacity: 0.8,
-                    weight: 2
-                  }}
-                >
-                  <Popup>
-                    <div className="text-xs">
-                      <strong>Point {getPointLabel(idx)}</strong><br />
-                      {coord.lat.toFixed(6)}, {coord.lng.toFixed(6)}
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              );
-            })}
-            
-            {/* Render polygon when 3+ points exist */}
-            {polygonCoords.length >= 3 && (
-              <Polygon
-                positions={polygonCoords.map(coord => [coord.lat, coord.lng])}
-                pathOptions={{
-                  color: '#3b82f6',
-                  fillColor: '#3b82f6',
-                  fillOpacity: 0.2,
-                  weight: 3
-                }}
-              />
-            )}
-          </MapContainer>
+          <div ref={mapDivRef} style={{ height: '100%', width: '100%' }} />
         )}
         
-        {/* Area badge overlay */}
+        {/* Area badge overlay - Desktop */}
         {polygonCoords.length >= 3 && (
-          <div className="absolute top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-md font-semibold z-[1000]">
+          <div className="hidden md:block absolute top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-md font-semibold z-[1000]">
             <p className="text-xs opacity-90">Boundary Area</p>
             <p className="text-base">{(calculatePolygonArea(polygonCoords) / 10000).toFixed(4)} ha</p>
           </div>
         )}
         
-        {/* Controls Overlay - Edit Mode */}
+        {/* Area badge overlay - Mobile (compact) */}
+        {polygonCoords.length >= 3 && (
+          <div className="md:hidden absolute top-2 right-2 bg-green-600 text-white px-2 py-1 rounded shadow-md text-xs font-semibold z-[1000]">
+            {(calculatePolygonArea(polygonCoords) / 10000).toFixed(3)} ha
+          </div>
+        )}
+        
+        {/* Controls Overlay - Desktop Edit Mode */}
         {mapMode === 'edit' && (
-          <div className="absolute top-6 left-6 bg-white rounded-lg shadow-md p-4 max-w-md z-[1000]">
+          <div className="hidden md:block absolute top-6 left-6 bg-white rounded-lg shadow-md p-4 max-w-md z-[1000]">
             <h3 className="font-semibold text-gray-900 mb-2">✏️ Add Points</h3>
             <p className="text-xs text-gray-600 mb-3">
               🖱️ Click anywhere on the map to add a point
@@ -573,27 +577,37 @@ export function BoundaryMappingModal({
               )}
             </div>
             
-
-            
             {/* Quick Actions */}
             {polygonCoords.length > 0 && (
               <div className="flex gap-2 pt-2 border-t border-gray-200">
                 <button
                   onClick={onRemoveLastPoint}
-                  disabled={isLocked}
-                  className="flex-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg text-xs font-medium hover:bg-yellow-200 transition-colors disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
+                  className="flex-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg text-xs font-medium hover:bg-yellow-200 transition-colors"
                 >
                   ↶ Undo
                 </button>
                 <button
                   onClick={onClearPolygon}
-                  disabled={isLocked}
-                  className="flex-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200 transition-colors disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
+                  className="flex-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200 transition-colors"
                 >
                   Clear All
                 </button>
               </div>
             )}
+          </div>
+        )}
+        
+        {/* Controls Overlay - Mobile Edit Mode (minimal) */}
+        {mapMode === 'edit' && (
+          <div className="md:hidden absolute top-2 left-2 bg-white rounded shadow-md px-2 py-1 z-[1000]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-900">
+                {polygonCoords.length}/{MAX_POINTS}
+              </span>
+              {polygonCoords.length >= MIN_POINTS && (
+                <span className="text-xs bg-green-100 text-green-800 px-1 rounded font-semibold">✓</span>
+              )}
+            </div>
           </div>
         )}
         
@@ -608,8 +622,8 @@ export function BoundaryMappingModal({
         )}
       </div>
       
-      {/* Footer */}
-      <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 space-y-4 h-[300px] flex flex-col">
+      {/* Footer - Desktop */}
+      <div className="hidden md:flex px-6 py-4 border-t border-gray-200 bg-gray-50 space-y-4 h-[300px] flex-col">
         {/* Paddy Specifications */}
         {polygonCoords.length > 0 && (
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
@@ -663,9 +677,9 @@ export function BoundaryMappingModal({
                   </div>
                   <button
                     onClick={() => handleRemovePoint(i)}
-                    disabled={i !== polygonCoords.length - 1 || isLocked}
+                    disabled={i !== polygonCoords.length - 1}
                     className={`ml-2 px-2 py-1 rounded text-sm font-medium transition-colors ${
-                      i === polygonCoords.length - 1 && !isLocked
+                      i === polygonCoords.length - 1
                         ? 'text-red-600 hover:text-red-700 hover:bg-red-50'
                         : 'text-gray-400 cursor-not-allowed'
                     }`}
@@ -694,6 +708,63 @@ export function BoundaryMappingModal({
               className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-bold shadow-lg transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {isSavingBoundary ? 'Saving...' : 'Save Boundary'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Footer - Mobile (compact bottom bar) */}
+      <div className="md:hidden px-3 py-2 border-t border-gray-200 bg-white">
+        {polygonCoords.length > 0 && (
+          <div className="flex items-center justify-between mb-2 text-xs">
+            <div>
+              <span className="font-bold text-gray-900">{polygonCoords.length} pts</span>
+              {polygonCoords.length >= 3 && (
+                <span className="text-gray-600 ml-2">
+                  {(calculatePolygonArea(polygonCoords) / 10000).toFixed(3)} ha
+                </span>
+              )}
+            </div>
+            {polygonCoords.length > 0 && mapMode === 'edit' && (
+              <div className="flex gap-2">
+                <button
+                  onClick={onRemoveLastPoint}
+                  className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs font-medium"
+                >
+                  Undo
+                </button>
+                <button
+                  onClick={onClearPolygon}
+                  className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {validationError && (
+          <div className="mb-2 bg-red-50 border border-red-200 rounded px-2 py-1">
+            <p className="text-xs text-red-800">{validationError}</p>
+          </div>
+        )}
+        
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            disabled={isSavingBoundary}
+            className="flex-1 px-3 py-2 border border-gray-300 text-gray-700 rounded font-medium text-sm"
+          >
+            {isLocked ? 'Close' : 'Cancel'}
+          </button>
+          {!isLocked && (
+            <button
+              onClick={handleSaveBoundary}
+              disabled={isSavingBoundary || polygonCoords.length < MIN_POINTS}
+              className="flex-1 px-3 py-2 bg-blue-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
+            >
+              {isSavingBoundary ? 'Saving...' : 'Save'}
             </button>
           )}
         </div>

@@ -15,7 +15,10 @@ export function formatTimeAgo(ts?: number) {
   if (min < 60) return `${min}m ago`
   const h = Math.floor(min / 60)
   if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
+  
+  // Show date if 24+ hours old
+  const date = new Date(ts < 1e11 ? ts * 1000 : ts)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 

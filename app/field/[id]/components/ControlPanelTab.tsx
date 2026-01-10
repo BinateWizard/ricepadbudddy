@@ -67,7 +67,7 @@ const CONTROL_ACTIONS: ControlAction[] = [
     description: 'Extend irrigation motor on selected devices (ESP32B).',
     nodeId: 'ESP32B',
     role: 'motor',
-    action: 'extend',
+    action: 'down',
   },
   {
     id: 'motor_retract',
@@ -75,15 +75,15 @@ const CONTROL_ACTIONS: ControlAction[] = [
     description: 'Retract irrigation motor on selected devices (ESP32B).',
     nodeId: 'ESP32B',
     role: 'motor',
-    action: 'retract',
+    action: 'up',
   },
   {
     id: 'gps_fetch',
     label: 'Request GPS Location',
     description: 'Ask devices to send their latest GPS fix (ESP32B).',
     nodeId: 'ESP32B',
-    role: 'motor',
-    action: 'get_location',
+    role: 'gps',
+    action: 'read',
   },
   {
     id: 'npk_scan',
@@ -976,7 +976,7 @@ function LocationControls({ devices }: { devices: Array<{ id: string; label?: st
   const requestLocationFor = async (id: string) => {
     try {
       // Send GPS request to ESP32B (motor controller has GPS)
-      const res = await sendDeviceCommand(id, 'ESP32B', 'motor', 'get_location', {}, user?.uid || '');
+      const res = await sendDeviceCommand(id, 'ESP32B', 'gps', 'read', {}, user?.uid || '');
 
       if (res.success) {
         // Fetch GPS data

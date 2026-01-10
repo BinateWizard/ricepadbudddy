@@ -6,6 +6,9 @@ admin.initializeApp({
   databaseURL: "https://rice-padbuddy-default-rtdb.asia-southeast1.firebasedatabase.app",
 });
 
+// Configure functions to deploy to asia-southeast1 region
+const regionalFunctions = functions.region('asia-southeast1');
+
 // ============================================
 // EXPORT ALL CLOUD FUNCTIONS
 // ============================================
@@ -531,7 +534,7 @@ export const helloWorld = functions.https.onRequest((request, response) => {
  * const sendCommand = httpsCallable(functions, 'sendDeviceCommand');
  * await sendCommand({ deviceId, nodeId, role, action, params });
  */
-export const sendDeviceCommand = functions.https.onCall(async (data, context) => {
+export const sendDeviceCommand = regionalFunctions.https.onCall(async (data, context) => {
   // Verify authentication
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -716,7 +719,7 @@ export const onCommandComplete = functions.database
  * Requires admin authentication to call
  * Deletes all users, fields, paddies, logs, notifications, and FCM tokens
  */
-export const cleanupAllUserData = functions.https.onCall(async (data, context) => {
+export const cleanupAllUserData = regionalFunctions.https.onCall(async (data, context) => {
   // Verify user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(

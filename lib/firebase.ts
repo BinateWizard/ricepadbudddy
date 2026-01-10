@@ -24,7 +24,8 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const database = getDatabase(app);
-const functions = getFunctions(app);
+// Functions are deployed to us-central1 (default region)
+const functions = getFunctions(app, 'us-central1');
 
 // Set auth persistence to LOCAL for PWA support
 // This ensures auth state persists even when app is closed

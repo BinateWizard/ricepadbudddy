@@ -33,6 +33,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [inputLat, setInputLat] = useState('');
   const [inputLng, setInputLng] = useState('');
+  const [showCoordsForm, setShowCoordsForm] = useState(false);
   
   if (!field) return null;
 
@@ -190,6 +191,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
     }
     
     setIsDrawing(false);
+    setShowCoordsForm(false);
     setShowMapBoundaryModal(true);
   };
 
@@ -582,9 +584,9 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Map Field Boundary</h2>
+              <h2 className="text-2xl font-bold text-gray-900">Boundary Map</h2>
               <p className="text-sm text-gray-600 mt-1">
-                Click on the map to add boundary points. You can also enter coordinates below. Add at least 3 points for an accurate polygon.
+                Tap the map to add points (min 3).
               </p>
             </div>
             <button
@@ -661,46 +663,55 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
             </svg>
             
             {/* Controls Overlay */}
-            <div className="absolute top-6 left-6 bg-white rounded-lg shadow-lg p-4 max-w-md">
+            <div className="absolute top-6 left-6 bg-white rounded-lg shadow-lg p-3 sm:p-4 max-w-[90%] sm:max-w-md">
               <div className="mb-4">
                 <p className="text-sm font-medium text-gray-900">
                   Points: {polygonCoords.length}
                 </p>
                 {polygonCoords.length >= 3 && (
                   <p className="text-xs text-gray-600">
-                    Area: ~{(calculatePolygonArea(polygonCoords) / 10000).toFixed(2)} hectares
+                    Area ~{(calculatePolygonArea(polygonCoords) / 10000).toFixed(2)} ha
                   </p>
                 )}
               </div>
               
-              {/* Coordinate Input Form */}
+              {/* Coordinate Input Toggle + Form */}
               <div className="space-y-3 mb-4 pb-4 border-b border-gray-200">
-                <p className="text-sm font-semibold text-gray-900">Add Coordinates</p>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    placeholder="Latitude"
-                    value={inputLat}
-                    onChange={(e) => setInputLat(e.target.value)}
-                    step="0.0001"
-                    className="flex-1 px-2 py-2 text-sm border border-gray-300 rounded bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <input
-                    type="number"
-                    placeholder="Longitude"
-                    value={inputLng}
-                    onChange={(e) => setInputLng(e.target.value)}
-                    step="0.0001"
-                    className="flex-1 px-2 py-2 text-sm border border-gray-300 rounded bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
                 <button
-                  onClick={handleAddCoordinateFromInput}
-                  disabled={!inputLat || !inputLng}
-                  className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  onClick={() => setShowCoordsForm((v) => !v)}
+                  className="w-full px-3 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg font-medium hover:bg-gray-50"
                 >
-                  ➕ Add Point
+                  {showCoordsForm ? 'Hide Coordinates' : 'Add Coordinates'}
                 </button>
+                {showCoordsForm && (
+                  <>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="Latitude"
+                        value={inputLat}
+                        onChange={(e) => setInputLat(e.target.value)}
+                        step="0.0001"
+                        className="flex-1 px-2 py-2 text-sm border border-gray-300 rounded bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Longitude"
+                        value={inputLng}
+                        onChange={(e) => setInputLng(e.target.value)}
+                        step="0.0001"
+                        className="flex-1 px-2 py-2 text-sm border border-gray-300 rounded bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAddCoordinateFromInput}
+                      disabled={!inputLat || !inputLng}
+                      className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                      ➕ Add Point
+                    </button>
+                  </>
+                )}
               </div>
               
               <div className="flex flex-wrap gap-2">
@@ -727,9 +738,9 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
             </div>
 
             {/* Info Note */}
-            <div className="absolute bottom-6 left-6 right-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-sm">
+            <div className="absolute bottom-6 left-6 right-6 bg-yellow-50 border border-yellow-200 rounded-lg p-3 sm:p-4 max-w-sm">
               <p className="text-sm text-yellow-800">
-                <strong>Tip:</strong> For precise boundary mapping, manually enter coordinates below or use a GPS device in the field.
+                <strong>Tip:</strong> For precision, add coordinates or use GPS.
               </p>
             </div>
           </div>
@@ -738,7 +749,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
           <div className="px-6 py-4 border-t border-gray-200 bg-white space-y-4">
             {polygonCoords.length > 0 && (
               <div className="max-h-40 overflow-y-auto">
-                <p className="font-semibold text-gray-900 mb-2">Boundary Points ({polygonCoords.length}):</p>
+                <p className="font-semibold text-gray-900 mb-2">Points ({polygonCoords.length}):</p>
                 <div className="space-y-2">
                   {polygonCoords.map((coord, i) => (
                     <div key={i} className="flex items-center justify-between bg-gray-50 p-3 rounded border border-gray-200">
@@ -776,7 +787,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
                 disabled={isSavingBoundary || polygonCoords.length < 3}
                 className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-bold shadow-lg transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
-                {isSavingBoundary ? 'Saving...' : 'Save Boundary'}
+                {isSavingBoundary ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>
