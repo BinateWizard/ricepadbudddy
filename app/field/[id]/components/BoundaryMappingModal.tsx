@@ -1,4 +1,4 @@
-'use client';
+    'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -218,15 +218,18 @@ export function BoundaryMappingModal({
       }).addTo(group);
     }
 
-    // Reference polygons (device boundaries) - render each separately
+    // Color palette for reference polygons (devices)
+    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ef4444', '#7c3aed', '#059669', '#f97316', '#0ea5a4'];
+    const FIELD_COLOR = '#ef4444'; // distinct color for the field boundary
+
+    // Reference polygons (device boundaries) - render each separately with indexed colors
     if (referencePolygons && Array.isArray(referencePolygons) && referencePolygons.length > 0) {
       referencePolygons.forEach((poly, idx) => {
         if (!poly || poly.length < 3) return;
-        // vary color slightly by index
-        const baseColor = '#8b5cf6';
+        const color = COLORS[idx % COLORS.length];
         L.polygon(poly.map((c) => [c.lat, c.lng]), {
-          color: baseColor,
-          fillColor: baseColor,
+          color: color,
+          fillColor: color,
           fillOpacity: 0.08,
           weight: 2,
           dashArray: '5, 5',
@@ -247,9 +250,9 @@ export function BoundaryMappingModal({
 
     if (polygonCoords.length >= 3) {
       L.polygon(polygonCoords.map((c) => [c.lat, c.lng]), {
-        color: '#3b82f6',
-        fillColor: '#3b82f6',
-        fillOpacity: 0.2,
+        color: FIELD_COLOR,
+        fillColor: FIELD_COLOR,
+        fillOpacity: 0.18,
         weight: 3,
       }).addTo(group);
     }

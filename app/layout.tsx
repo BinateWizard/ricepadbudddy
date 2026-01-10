@@ -7,6 +7,7 @@ import PageLoader from "@/components/PageLoader";
 import OfflineIndicator from "@/components/OfflineIndicator";
 import PushNotificationSetup from "@/components/PushNotificationSetup";
 import ClientOnly from "@/components/ClientOnly";
+import { NavigationProvider } from '@/context/NavigationContext';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -56,10 +57,12 @@ export default function RootLayout({
         <ClientOnly>
           <AuthProvider>
             <NotificationProvider>
-              <PushNotificationSetup />
-              <OfflineIndicator />
-              <PageLoader />
-              {children}
+              <NavigationProvider>
+                <PushNotificationSetup />
+                <OfflineIndicator />
+                <PageLoader />
+                {children}
+              </NavigationProvider>
             </NotificationProvider>
           </AuthProvider>
         </ClientOnly>

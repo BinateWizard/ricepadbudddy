@@ -214,6 +214,8 @@ export default function Home() {
     }
   }, [user, loading]);
 
+  // farm overview map moved to a dedicated page
+
   // Cloud Functions now handle device monitoring and notifications automatically
   // No frontend monitoring needed
   
@@ -554,6 +556,15 @@ export default function Home() {
           <div className="mt-8">
             <h2 className="text-2xl font-bold text-gray-900">Your Fields</h2>
             <p className="text-gray-600 mt-1">Manage and monitor your rice fields</p>
+          </div>
+
+          {/* View Your Farm */}
+          <div className="mt-6">
+            <h3 className="text-lg font-semibold text-gray-900">View your farm</h3>
+            <p className="text-sm text-gray-600 mb-3">Open the full farm map to see all field and device boundaries.</p>
+            <div className="mt-3">
+              <Button navigates onClick={() => router.push('/farm')} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">Open Farm Map</Button>
+            </div>
           </div>
 
           {/* Fields List */}
@@ -1112,6 +1123,7 @@ export default function Home() {
                       ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
                       : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
                   }`}
+                  navigates
                   onClick={() => {
                     router.push('/');
                     setIsMenuOpen(false);
@@ -1132,6 +1144,7 @@ export default function Home() {
                       ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
                       : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
                   }`}
+                  navigates
                   onClick={() => {
                     router.push('/varieties');
                     setIsMenuOpen(false);
@@ -1153,6 +1166,7 @@ export default function Home() {
                         ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
                         : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
                     }`}
+                    navigates
                     onClick={() => {
                       router.push('/help');
                       setIsMenuOpen(false);
@@ -1175,6 +1189,7 @@ export default function Home() {
                         ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
                         : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
                     }`}
+                    navigates
                     onClick={() => {
                       router.push('/about');
                       setIsMenuOpen(false);
@@ -1195,7 +1210,7 @@ export default function Home() {
                 <div className="my-3 border-t border-green-200/50" />
                 
                 {/* Settings */}
-                <Button
+                  <Button
                   variant="ghost"
                   className="w-full justify-start transition-all duration-200 relative hover:bg-white/60 hover:text-gray-900 text-gray-700"
                   onClick={() => {
@@ -1212,6 +1227,7 @@ export default function Home() {
                   <Button
                     variant="ghost"
                     className="w-full justify-start transition-all duration-200 relative bg-purple-50 hover:bg-purple-100 text-purple-700"
+                    navigates
                     onClick={() => {
                       router.push('/admin');
                       setIsMenuOpen(false);

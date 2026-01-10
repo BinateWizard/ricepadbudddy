@@ -1,6 +1,9 @@
+"use client";
+
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
+import { useNavigation } from '@/context/NavigationContext';
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
@@ -35,16 +38,40 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean
+  loading?: boolean;
+  navigates?: boolean;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => {
+  ({ className, variant, size, loading, navigates, onClick, ...props }, ref) => {
+    let navSetLoading: ((v: boolean) => void) | undefined = undefined;
+    try {
+      const nav = useNavigation();
+      navSetLoading = nav.setLoading;
+    } catch (e) {
+      // provider not available
+    }
+
+    const handleClick = (e: any) => {
+      if (navigates && navSetLoading) {
+        try { navSetLoading(true); } catch (err) {}
+      }
+      if (onClick) return onClick(e);
+    };
+
     return (
       <button
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        onClick={handleClick}
+        disabled={loading || props.disabled}
         {...props}
-      />
+      >
+        {loading ? (
+          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" className="opacity-75"/></svg>
+        ) : null}
+        {props.children}
+      </button>
     )
   }
 )

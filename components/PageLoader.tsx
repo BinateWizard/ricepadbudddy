@@ -3,12 +3,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
+import { useNavigation } from '@/context/NavigationContext';
 
 export default function PageLoader() {
   const [loading, setLoading] = useState(false);
   const pathname = usePathname();
   const isFirstLoad = useRef(true);
   const previousPathname = useRef<string | null>(null);
+  const nav = useNavigation();
 
   useEffect(() => {
     // Skip loader on first mount (PWA initial load) - let the page render naturally
@@ -25,16 +27,19 @@ export default function PageLoader() {
 
     previousPathname.current = pathname;
     setLoading(true);
-    
+
     // Short timeout for smooth navigation feel
     const timer = setTimeout(() => {
       setLoading(false);
+      // clear navigation context if set
+      try { nav.setLoading(false); } catch (e) {}
     }, 300);
 
     return () => clearTimeout(timer);
   }, [pathname]);
 
-  if (!loading) return null;
+  // also show when global navigation context requests loading
+  if (!loading && !nav.loading) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-gradient-to-br from-green-400 via-green-500 to-green-600">
