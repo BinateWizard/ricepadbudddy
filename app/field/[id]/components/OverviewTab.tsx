@@ -167,6 +167,9 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
     }
   }).sort((a, b) => a.day - b.day);
 
+  // Alias for legacy references to currentAndUpcomingActivities to prevent ReferenceError
+  const currentAndUpcomingActivities = filteredActivities;
+
   return (
     <div className="space-y-6 -mx-1 sm:mx-0">
       {/* Growth Progress Bar */}

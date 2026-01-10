@@ -1,6 +1,8 @@
 // This file has been cleared for a fresh start.
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { MapPin } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { getDeviceStatus, getDeviceGPS, getDeviceNPK } from '@/lib/utils/deviceStatus';
 import { database, db } from '@/lib/firebase';
@@ -200,32 +202,37 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
       const deviceId = paddy.deviceId;
       if (!deviceId) return;
 
-      // Listen to each relay individually from /relays path (primary source)
-      for (let i = 1; i <= 4; i++) {
-        const relayRef = dbRef(database, `devices/${deviceId}/relays/${i}`);
-        const unsubscribe = onValue(relayRef, (snapshot) => {
-          if (snapshot.exists()) {
-            const relayData = snapshot.val();
-            const state = relayData.state === 'ON' || relayData.state === 'on' || relayData.state === true ? 'on' : 'off';
-            
-            setDeviceData(prev => 
-              prev.map(dev => {
-                if (dev.id === deviceId) {
-                  return {
-                    ...dev,
-                    relayStates: {
-                      ...dev.relayStates,
-                      [i]: state
-                    }
-                  };
+      // Listen to entire relays array/object from RTDB
+      const relaysRef = dbRef(database, `devices/${deviceId}/relays`);
+      const relaysUnsubscribe = onValue(relaysRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const relaysData = snapshot.val();
+          
+          setDeviceData(prev => 
+            prev.map(dev => {
+              if (dev.id === deviceId) {
+                const newRelayStates = { ...dev.relayStates };
+                
+                // Handle both array (with null at 0) and object structure
+                for (let i = 1; i <= 4; i++) {
+                  const relayData = relaysData[i];
+                  if (relayData && relayData.state) {
+                    const state = relayData.state === 'ON' || relayData.state === 'on' || relayData.state === true ? 'on' : 'off';
+                    newRelayStates[i] = state;
+                  }
                 }
-                return dev;
-              })
-            );
-          }
-        });
-        allUnsubscribes.push(unsubscribe);
-      }
+                
+                return {
+                  ...dev,
+                  relayStates: newRelayStates
+                };
+              }
+              return dev;
+            })
+          );
+        }
+      });
+      allUnsubscribes.push(relaysUnsubscribe);
 
       // FALLBACK: If /relays path doesn't have data yet, derive from latest commands
       // This keeps the UI in sync even before verifyLiveCommand populates /relays
@@ -275,17 +282,21 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
     try {
       const result = await sendDeviceCommand(deviceId, 'ESP32A', 'relay', action, { relay }, user.uid);
       
-      // Log the action via Cloud Function
-      await logDeviceAction({
-        deviceId,
-        fieldId: fieldId || '',
-        nodeId: 'ESP32A',
-        action: `Relay ${relay} ${action.toUpperCase()}`,
-        actionType: 'relay',
-        params: { relay, action },
-        result: result.success ? 'success' : 'failed',
-        details: result
-      });
+      // Log the action via Cloud Function - wrapped in try-catch to prevent breaking the UI
+      try {
+        await logDeviceAction({
+          deviceId,
+          fieldId: fieldId || '',
+          nodeId: 'ESP32A',
+          action: `Relay ${relay} ${action.toUpperCase()}`,
+          actionType: 'relay',
+          params: { relay, action },
+          result: result.success ? 'success' : 'failed',
+          details: result
+        });
+      } catch (logError) {
+        console.warn('Failed to log device action (non-critical):', logError);
+      }
       
       if (result.success) {
         console.log(`[Relay] Command ${action} sent successfully`, result);
@@ -298,17 +309,23 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
       }
     } catch (e) {
       console.error('Failed to send relay command', e);
-      // Log the error
-      await logDeviceAction({
-        deviceId,
-        fieldId: fieldId || '',
-        nodeId: 'ESP32A',
-        action: `Relay ${relay} ${action.toUpperCase()} - Failed`,
-        actionType: 'relay',
-        params: { relay, action },
-        result: 'failed',
-        error: String(e)
-      });
+      
+      // Log the error - wrapped in try-catch to prevent breaking the UI
+      try {
+        await logDeviceAction({
+          deviceId,
+          fieldId: fieldId || '',
+          nodeId: 'ESP32A',
+          action: `Relay ${relay} ${action.toUpperCase()} - Failed`,
+          actionType: 'relay',
+          params: { relay, action },
+          result: 'failed',
+          error: String(e)
+        });
+      } catch (logError) {
+        console.warn('Failed to log error (non-critical):', logError);
+      }
+      
       alert('Failed to send relay command');
     } finally {
       setSendingRelay(null);
@@ -353,7 +370,17 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
                       <span className={`inline-block w-3 h-3 rounded-full ${dev.status?.color === 'green' ? 'bg-green-500' : dev.status?.color === 'yellow' ? 'bg-yellow-400' : 'bg-red-500'}`}></span>
                       <span className="font-bold text-lg text-black bg-white px-2 py-0.5 rounded">{dev.paddyName || `Paddy ${dev.paddyId}`}</span>
                       <span className="ml-2 px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-black">{dev.status?.badge || 'Unknown'}</span>
-                      <span className="ml-auto text-sm text-black">Device: {dev.id}</span>
+                      <div className="ml-auto flex items-center gap-2 text-sm text-black">
+                        <span>Device: {dev.id}</span>
+                        <Link
+                          href={`/device/${dev.id}`}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 hover:text-emerald-800 transition"
+                          title="View device location"
+                          aria-label={`View device ${dev.id} location`}
+                        >
+                          <MapPin className="w-4 h-4" />
+                        </Link>
+                      </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       {/* NPK Reading Card */}
@@ -716,29 +743,40 @@ function ActionRunnerModal({ actionId, onClose, devices, userId }: ActionRunnerM
             },
           }));
 
-          logControlAction({
-            deviceId,
-            action: `${action.role}:${action.action}`,
-            details: {
-              via: 'field-control-modal',
-              relay: params.relay,
-              duration: params.duration,
-              success: res.success,
-              status: res.status,
-              message: res.message,
-            },
-          });
+          // Log control action - wrapped in try-catch to prevent breaking the UI
+          try {
+            await logControlAction({
+              deviceId,
+              action: `${action.role}:${action.action}`,
+              details: {
+                via: 'field-control-modal',
+                relay: params.relay,
+                duration: params.duration,
+                success: res.success,
+                status: res.status,
+                message: res.message,
+              },
+            });
+          } catch (logError) {
+            console.warn('Failed to log control action (non-critical):', logError);
+          }
         } catch (e: any) {
           const msg = e instanceof Error ? e.message : String(e);
           setResults((prev) => ({
             ...prev,
             [deviceId]: { status: 'error', message: `Error: ${msg}` },
           }));
-          logControlAction({
-            deviceId,
-            action: `${action.role}:${action.action}`,
-            details: { via: 'field-control-modal', error: msg },
-          });
+          
+          // Log error - wrapped in try-catch to prevent breaking the UI
+          try {
+            await logControlAction({
+              deviceId,
+              action: `${action.role}:${action.action}`,
+              details: { via: 'field-control-modal', error: msg },
+            });
+          } catch (logError) {
+            console.warn('Failed to log error (non-critical):', logError);
+          }
         }
       })
     );
@@ -1214,18 +1252,27 @@ function DeviceLogsSection({ fieldId }: { fieldId: string }) {
         const result = await getFieldLogs(fieldId, 50);
         if (result.success) {
           setLogs(result.logs || []);
+        } else {
+          // Treat as empty rather than surfacing console errors
+          setLogs([]);
         }
-      } catch (error) {
-        console.error('Error fetching field logs:', error);
+      } catch (_error: any) {
+        // Suppress noisy console errors; just show empty state
+        setLogs([]);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchLogs();
-    // Refresh logs every 30 seconds
-    const interval = setInterval(fetchLogs, 30000);
-    return () => clearInterval(interval);
+    if (fieldId) {
+      fetchLogs();
+      // Refresh logs every 30 seconds
+      const interval = setInterval(fetchLogs, 30000);
+      return () => clearInterval(interval);
+    } else {
+      setLoading(false);
+      setLogs([]);
+    }
   }, [fieldId]);
 
   const displayLogs = showAll ? logs : logs.slice(0, 5);

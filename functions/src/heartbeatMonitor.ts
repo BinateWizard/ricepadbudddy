@@ -51,13 +51,14 @@ export const monitorHeartbeat = functions.database
       const heartbeatValue = typeof after === 'number' ? after : (after?.heartbeat || after?.lastSeen || 0);
       const previousHeartbeat = deviceData.lastHeartbeat || 0;
       
-      // Detect if heartbeat is changing (device is alive)
-      // If heartbeat value increased, device is online (works for both millis() and Unix timestamp)
-      const heartbeatChanged = heartbeatValue > previousHeartbeat;
-      const isOnline = heartbeatChanged;
+      // Detect if heartbeat is recent (device is alive)
+      // If heartbeat value is different and recent, device is online
+      const heartbeatAge = now - heartbeatValue;
+      const isRecentHeartbeat = heartbeatAge < HEARTBEAT_TIMEOUT;
+      const isOnline = isRecentHeartbeat;
       const wasOnline = deviceData.connected === true;
       
-      console.log(`[Heartbeat] Device ${deviceId} - Previous: ${previousHeartbeat}, Current: ${heartbeatValue}, Changed: ${heartbeatChanged}`);
+      console.log(`[Heartbeat] Device ${deviceId} - Previous: ${previousHeartbeat}, Current: ${heartbeatValue}, Age: ${heartbeatAge}ms, Online: ${isOnline}`);
       
       // Update RTDB status for frontend
       await admin.database().ref(`devices/${deviceId}/status`).update({
@@ -93,7 +94,7 @@ export const monitorHeartbeat = functions.database
             details: {
               lastSeen: heartbeatValue,
               previousHeartbeat: previousHeartbeat,
-              heartbeatChanged: heartbeatChanged,
+              heartbeatAge: heartbeatAge,
               deviceName: deviceData.name || deviceId
             }
           });

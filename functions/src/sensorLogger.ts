@@ -57,12 +57,21 @@ export const logSensorData = functions.database
       }
       
       // Check if data is fresh (not older than 1 hour)
+      // Handle both relative timestamps (device millis) and absolute timestamps (epoch time)
       const now = Date.now();
-      const dataAge = now - timestamp;
+      const isRelativeTime = timestamp < 10000000000; // < 10 billion = device millis
       
-      if (dataAge > 60 * 60 * 1000) {
-        console.warn(`[Sensor Logger] Stale NPK data for device ${deviceId}: ${Math.floor(dataAge / 60000)} minutes old`);
-        return null;
+      if (!isRelativeTime) {
+        // Absolute timestamp - check if data is fresh
+        const dataAge = now - timestamp;
+        
+        if (dataAge > 60 * 60 * 1000) {
+          console.warn(`[Sensor Logger] Stale NPK data for device ${deviceId}: ${Math.floor(dataAge / 60000)} minutes old`);
+          return null;
+        }
+      } else {
+        // Relative timestamp (device millis since boot) - accept any non-zero value as fresh
+        console.log(`[Sensor Logger] NPK data with relative timestamp: ${timestamp}ms (device boot time)`);
       }
       
       // Get device document

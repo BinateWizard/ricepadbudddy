@@ -44,7 +44,8 @@ export {
 } from './systemLogger';
 
 // 8️⃣ Notification Dispatcher
-export * from './notificationDispatcher';
+// Temporarily disabled dispatchNotification trigger - deploy callable functions only
+// export * from './notificationDispatcher';
 
 // 9️⃣ User Action Logger (includes sendTestNotification)
 export * from './userActionLogger';

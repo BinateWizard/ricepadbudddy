@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 interface DeviceLoadingModalProps {
@@ -11,10 +12,15 @@ interface DeviceLoadingModalProps {
 }
 
 export function DeviceLoadingModal({ isOpen, deviceId, onCancel, onError }: DeviceLoadingModalProps) {
+  const [mounted, setMounted] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('Initializing...');
   const [progress, setProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -78,9 +84,9 @@ export function DeviceLoadingModal({ isOpen, deviceId, onCancel, onError }: Devi
     };
   }, [isOpen, onError]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
+  const modal = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop with blur */}
       <div 
@@ -194,4 +200,6 @@ export function DeviceLoadingModal({ isOpen, deviceId, onCancel, onError }: Devi
       `}</style>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
