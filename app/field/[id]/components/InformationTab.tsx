@@ -31,7 +31,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
   const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 }); // Default: Philippines
   const [polygonCoords, setPolygonCoords] = useState<{lat: number; lng: number}[]>([]);
   const [isSavingBoundary, setIsSavingBoundary] = useState(false);
-  const [deviceBoundaries, setDeviceBoundaries] = useState<{ lat: number; lng: number }[] | null>(null);
+  const [deviceBoundaries, setDeviceBoundaries] = useState<{ lat: number; lng: number }[][] | null>(null);
   
   if (!field) return null;
 
@@ -150,17 +150,18 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
           const paddiesRef = collection(db, `users/${user.uid}/fields/${field.id}/paddies`);
           const paddiesSnapshot = await getDocs(paddiesRef);
           
-          // Collect all device boundaries
-          const allDeviceBoundaries: { lat: number; lng: number }[] = [];
+          // Collect device boundaries per paddy (array of polygons)
+          const allDeviceBoundaries: { lat: number; lng: number }[][] = [];
           for (const paddyDoc of paddiesSnapshot.docs) {
             const paddyData = paddyDoc.data();
             if (paddyData.boundary && paddyData.boundary.coordinates && Array.isArray(paddyData.boundary.coordinates)) {
-              allDeviceBoundaries.push(...paddyData.boundary.coordinates);
+              // ensure it's a valid polygon
+              const coords = paddyData.boundary.coordinates as { lat: number; lng: number }[];
+              if (coords.length >= 3) allDeviceBoundaries.push(coords);
             }
           }
-          
-          // If we have device boundaries, use the first one as reference
-          if (allDeviceBoundaries.length >= 3) {
+
+          if (allDeviceBoundaries.length > 0) {
             setDeviceBoundaries(allDeviceBoundaries);
           } else {
             setDeviceBoundaries(null);
@@ -564,7 +565,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
         onClearPolygon={handleClearPolygon}
         onSaveBoundary={handleSaveBoundary}
         calculatePolygonArea={calculatePolygonArea}
-        referencePolygon={deviceBoundaries}
+        referencePolygons={deviceBoundaries}
       />
     </div>
   );

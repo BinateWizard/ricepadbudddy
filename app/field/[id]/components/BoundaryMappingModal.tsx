@@ -30,7 +30,7 @@ interface BoundaryMappingModalProps {
   onClearPolygon: () => void;
   onSaveBoundary: () => Promise<void>;
   calculatePolygonArea: (coords: { lat: number; lng: number }[]) => number;
-  referencePolygon?: { lat: number; lng: number }[];
+  referencePolygons?: { lat: number; lng: number }[][];
 }
 
 export function BoundaryMappingModal({
@@ -46,7 +46,7 @@ export function BoundaryMappingModal({
   onClearPolygon,
   onSaveBoundary,
   calculatePolygonArea,
-  referencePolygon
+  referencePolygons
 }: BoundaryMappingModalProps) {
   // Configuration constants
   const MIN_POINT_DISTANCE_METERS = 0.5;
@@ -218,16 +218,21 @@ export function BoundaryMappingModal({
       }).addTo(group);
     }
 
-    // Reference polygon (device boundaries) - semi-transparent overlay
-    if (referencePolygon && referencePolygon.length >= 3) {
-      L.polygon(referencePolygon.map((c) => [c.lat, c.lng]), {
-        color: '#8b5cf6',
-        fillColor: '#8b5cf6',
-        fillOpacity: 0.1,
-        weight: 2,
-        dashArray: '5, 5',
-        className: 'reference-polygon'
-      }).addTo(group);
+    // Reference polygons (device boundaries) - render each separately
+    if (referencePolygons && Array.isArray(referencePolygons) && referencePolygons.length > 0) {
+      referencePolygons.forEach((poly, idx) => {
+        if (!poly || poly.length < 3) return;
+        // vary color slightly by index
+        const baseColor = '#8b5cf6';
+        L.polygon(poly.map((c) => [c.lat, c.lng]), {
+          color: baseColor,
+          fillColor: baseColor,
+          fillOpacity: 0.08,
+          weight: 2,
+          dashArray: '5, 5',
+          className: 'reference-polygon'
+        }).bindTooltip(`Device ${idx + 1}`, { permanent: false, direction: 'center' }).addTo(group);
+      });
     }
 
     polygonCoords.forEach((coord) => {
@@ -248,7 +253,7 @@ export function BoundaryMappingModal({
         weight: 3,
       }).addTo(group);
     }
-  }, [polygonCoords, currentCenter, referencePolygon]);
+  }, [polygonCoords, currentCenter, referencePolygons]);
 
   if (!show || !isMounted || typeof window === 'undefined') return null;
 
