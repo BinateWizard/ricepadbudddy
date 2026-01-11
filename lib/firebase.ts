@@ -24,8 +24,23 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const database = getDatabase(app);
-// Functions are deployed to us-central1 (default region)
-const functions = getFunctions(app, 'us-central1');
+// Determine functions region: explicit env var takes precedence. Otherwise
+// infer from the RTDB URL hostname (e.g. '...asia-southeast1...') and
+// fall back to 'us-central1'. This helps when RTDB and Functions are
+// deployed to the same region.
+const explicitRegion = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION;
+let inferredRegion = 'us-central1';
+try {
+  const dbUrl = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || '';
+  const m = dbUrl.match(/\.([a-z0-9-]+)\.firebasedatabase\.app/);
+  if (m && m[1]) {
+    inferredRegion = m[1];
+  }
+} catch (e) {
+  // ignore and use default
+}
+const functionsRegion = explicitRegion || inferredRegion || 'us-central1';
+const functions = getFunctions(app, functionsRegion as any);
 
 // Set auth persistence to LOCAL for PWA support
 // This ensures auth state persists even when app is closed

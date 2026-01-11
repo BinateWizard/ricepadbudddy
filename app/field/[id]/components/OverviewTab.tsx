@@ -175,8 +175,7 @@ export function OverviewTab({ field, paddies, deviceReadings = [] }: OverviewTab
     }
   }).sort((a, b) => a.day - b.day);
 
-  // Alias for legacy references to currentAndUpcomingActivities to prevent ReferenceError
-  const currentAndUpcomingActivities = filteredActivities;
+  // Use `filteredActivities` directly (no legacy alias)
 
   return (
     <div className="space-y-6 -mx-1 sm:mx-0">

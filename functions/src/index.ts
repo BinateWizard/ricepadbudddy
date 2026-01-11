@@ -6,8 +6,9 @@ admin.initializeApp({
   databaseURL: "https://rice-padbuddy-default-rtdb.asia-southeast1.firebasedatabase.app",
 });
 
-// Configure functions to deploy to asia-southeast1 region
-const regionalFunctions = functions.region('asia-southeast1');
+// Configure functions region via environment var; default to us-central1
+const functionsRegion = process.env.FUNCTIONS_REGION || 'us-central1';
+const regionalFunctions = functions.region(functionsRegion);
 
 // ============================================
 // EXPORT ALL CLOUD FUNCTIONS
@@ -627,6 +628,22 @@ export const sendDeviceCommand = regionalFunctions.https.onCall(async (data, con
       commandPath = `commands/${nodeId}/${role}`;
     }
     
+    // If this is a GPS read command, clear any stale GPS error state so the
+    // frontend doesn't immediately see a previous failure. We set status to
+    // 'pending' and clear the error field before writing the new command.
+    if (role === 'gps') {
+      try {
+        const db = admin.database();
+        await db.ref(`devices/${deviceId}/gps`).update({
+          status: 'pending',
+          error: null,
+          timestamp: now
+        });
+      } catch (gpsClearErr: any) {
+        console.warn(`[Command] Failed to clear GPS error for ${deviceId}: ${gpsClearErr?.message || gpsClearErr}`);
+      }
+    }
+
     await deviceRef.update({
       [commandPath]: commandData,
       [`audit/lastCommand`]: action,

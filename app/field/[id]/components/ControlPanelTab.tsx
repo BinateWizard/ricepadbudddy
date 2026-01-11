@@ -490,10 +490,7 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
                     ))}
                   </div>
 
-                  {/* Device Logs Section */}
-                  <div className="mt-8 pt-6 border-t-2 border-gray-200">
-                    <DeviceLogsSection fieldId={fieldId || ''} />
-                  </div>
+                  {/* Device Logs Section removed from Controls tab to avoid unnecessary fetches */}
                 </div>
               )
             ) : (

@@ -21,18 +21,6 @@
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ],
       "source": "functions"
-    },
-    {
-      "source": "padbuddy",
-      "codebase": "padbuddy",
-      "disallowLegacyRuntimeConfig": true,
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "*.local"
-      ]
     }
   ]
 }

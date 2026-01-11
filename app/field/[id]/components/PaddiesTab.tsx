@@ -101,8 +101,8 @@ export function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onVi
   };
 
   const handleLoadingError = (error: string) => {
-    console.error('Device loading error:', error);
-    // Error state is shown in the modal, user can close it
+    // Error state is shown in the modal; avoid spamming console.error
+    // optionally we could show a toast or analytics event here
   };
 
   const handleScanDevice = async (e: React.MouseEvent, paddy: any) => {

@@ -88,70 +88,80 @@ export function GetLocationModal({
     // Monitor GPS data - wait for updates AFTER modal opens
     const unsubscribeGPS = onValue(gpsRef, (snapshot) => {
       const data = snapshot.val();
-      
       if (!data) {
         console.log('[GetLocationModal] No GPS data yet');
         return;
       }
-      
-      console.log('[GetLocationModal] GPS data exists:', data);
-      
-      // Check if GPS data contains an error from ESP32B
-      if (data.status === 'error') {
-        console.log('[GetLocationModal] GPS error from device - no signal');
-        setError('GPS fix timeout - device cannot acquire satellite signal');
-        setStep('received');
-        clearTimeout(timeoutTimer);
-        return;
-      }
-      
-      // Check if we have valid GPS coordinates and status is ok
-      if (data.status === 'ok' && data.lat && data.lng && data.lat !== 0 && data.lng !== 0) {
-        const gpsTime = data.timestamp || data.ts || 0;
-        
-        // Check if timestamp is relative (device millis) or absolute (epoch time)
-        // Device millis is < 10^10, epoch time is > 10^10
-        const isRelativeTime = gpsTime < 10000000000;
-        
-        if (isRelativeTime) {
-          // Device hasn't synced NTP yet, using millis() since boot
-          // Just check that we have a non-zero timestamp (any value means fresh data from current session)
-          console.log('[GetLocationModal] GPS data received with relative timestamp:', gpsTime, 'ms (device boot time)');
-          setGpsData({
-            lat: data.lat,
-            lng: data.lng,
-            alt: data.alt,
-            hdop: data.hdop,
-            sats: data.sats,
-            ts: gpsTime
-          });
-          setStep('received');
-          setShowViewPrompt(true);
-          clearTimeout(timeoutTimer);
-        } else {
-          // Device has NTP time synced, check if data is fresh
-          const age = Date.now() - gpsTime;
-          console.log('[GetLocationModal] GPS data age:', age, 'ms (epoch time)');
-          
-          // Accept GPS data that's fresh (less than 3 minutes old)
-          if (age < 180000) {
-            console.log('[GetLocationModal] Valid GPS coordinates found');
-            setGpsData({
-              lat: data.lat,
-              lng: data.lng,
-              alt: data.alt,
-              hdop: data.hdop,
-              sats: data.sats,
-              ts: gpsTime
-            });
-            setStep('received');
-            setShowViewPrompt(true);
-            clearTimeout(timeoutTimer);
-          } else {
-            console.log('[GetLocationModal] GPS data too old, age:', age, 'ms');
+
+      // To avoid acting on stale error states from previous attempts,
+      // check the related command's requestedAt timestamp and ignore GPS
+      // updates that pre-date the modal opening (with a small grace window).
+      (async () => {
+        try {
+          const { get } = await import('firebase/database');
+          const cmdSnap = await get(commandRef);
+          const cmd = cmdSnap.val() || {};
+          const cmdTime = cmd.requestedAt || 0;
+          // If the command is older than modalOpenedAt - 5000ms, ignore this GPS update
+          if (cmdTime && cmdTime < modalOpenedAt - 5000) {
+            console.log('[GetLocationModal] Ignoring GPS update from before modal opened');
+            return;
           }
+
+          console.log('[GetLocationModal] GPS data exists:', data);
+
+          // Check if GPS data contains an error from ESP32B
+          if (data.status === 'error') {
+            console.log('[GetLocationModal] GPS error from device - no signal');
+            setError('GPS fix timeout - device cannot acquire satellite signal');
+            setStep('received');
+            clearTimeout(timeoutTimer);
+            return;
+          }
+
+          // Check if we have valid GPS coordinates and status is ok
+          if (data.status === 'ok' && data.lat && data.lng && data.lat !== 0 && data.lng !== 0) {
+            const gpsTime = data.timestamp || data.ts || 0;
+            const isRelativeTime = gpsTime < 10000000000;
+
+            if (isRelativeTime) {
+              console.log('[GetLocationModal] GPS data received with relative timestamp:', gpsTime, 'ms (device boot time)');
+              setGpsData({
+                lat: data.lat,
+                lng: data.lng,
+                alt: data.alt,
+                hdop: data.hdop,
+                sats: data.sats,
+                ts: gpsTime
+              });
+              setStep('received');
+              setShowViewPrompt(true);
+              clearTimeout(timeoutTimer);
+            } else {
+              const age = Date.now() - gpsTime;
+              console.log('[GetLocationModal] GPS data age:', age, 'ms (epoch time)');
+              if (age < 180000) {
+                console.log('[GetLocationModal] Valid GPS coordinates found');
+                setGpsData({
+                  lat: data.lat,
+                  lng: data.lng,
+                  alt: data.alt,
+                  hdop: data.hdop,
+                  sats: data.sats,
+                  ts: gpsTime
+                });
+                setStep('received');
+                setShowViewPrompt(true);
+                clearTimeout(timeoutTimer);
+              } else {
+                console.log('[GetLocationModal] GPS data too old, age:', age, 'ms');
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[GetLocationModal] Error checking command timestamp for GPS update:', err);
         }
-      }
+      })();
     });
 
     // Monitor command for errors - only react to commands created after modal opened

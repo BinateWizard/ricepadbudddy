@@ -9,6 +9,9 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 
+// Ensure this module uses the same regionalFunctions configuration as index.ts
+const regionalFunctions = functions.region(process.env.FUNCTIONS_REGION || 'us-central1');
+
 export interface DeviceAction {
   deviceId: string;
   userId: string;
@@ -30,7 +33,7 @@ export interface DeviceAction {
  * 
  * Note: onCall functions handle CORS automatically
  */
-export const logDeviceAction = functions.https.onCall(async (data: DeviceAction, context) => {
+export const logDeviceAction = regionalFunctions.https.onCall(async (data: DeviceAction, context) => {
   // Verify authentication
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -90,13 +93,9 @@ export const logDeviceAction = functions.https.onCall(async (data: DeviceAction,
       logId: deviceLogRef.id,
       timestamp
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[Device Action Logger] Error logging action for device ${deviceId}:`, error);
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to log device action',
-      error
-    );
+    return { success: false, message: 'Failed to log device action', error: error?.message || String(error) };
   }
 });
 
@@ -105,7 +104,7 @@ export const logDeviceAction = functions.https.onCall(async (data: DeviceAction,
  * 
  * Fetch logs for a specific device with pagination
  */
-export const getDeviceLogs = functions.https.onCall(async (data: { deviceId: string; limit?: number; startAfter?: number }, context) => {
+export const getDeviceLogs = regionalFunctions.https.onCall(async (data: { deviceId: string; limit?: number; startAfter?: number }, context) => {
   // Verify authentication
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -149,13 +148,9 @@ export const getDeviceLogs = functions.https.onCall(async (data: { deviceId: str
       logs,
       hasMore: snapshot.docs.length === limit
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[Device Action Logger] Error fetching logs for device ${deviceId}:`, error);
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to fetch device logs',
-      error
-    );
+    return { success: false, logs: [], message: 'Failed to fetch device logs', error: error?.message || String(error) };
   }
 });
 
@@ -164,7 +159,7 @@ export const getDeviceLogs = functions.https.onCall(async (data: { deviceId: str
  * 
  * Fetch all logs for devices in a field
  */
-export const getFieldLogs = functions.https.onCall(async (data: { fieldId: string; limit?: number }, context) => {
+export const getFieldLogs = regionalFunctions.https.onCall(async (data: { fieldId: string; limit?: number }, context) => {
   // Verify authentication
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -186,31 +181,26 @@ export const getFieldLogs = functions.https.onCall(async (data: { fieldId: strin
   try {
     const firestore = admin.firestore();
     
-    // Get logs from user's deviceActions where fieldId matches
-    const snapshot = await firestore
-      .collection('users')
-      .doc(userId)
-      .collection('deviceActions')
-      .where('fieldId', '==', fieldId)
-      .orderBy('timestamp', 'desc')
-      .limit(limit)
-      .get();
+    // NOTE: avoid composite-index requirements by reading the user's deviceActions
+    // collection and performing filter+sort in memory. This trades read cost for
+    // predictable behaviour without requiring index creation during development.
+    const colRef = firestore.collection('users').doc(userId).collection('deviceActions');
+    const snapshot = await colRef.get();
 
-    const logs = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+
+    // Filter by fieldId and sort by timestamp descending
+    const filtered = allLogs
+      .filter((entry) => entry.fieldId === fieldId)
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, limit);
 
     return {
       success: true,
-      logs
+      logs: filtered
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[Device Action Logger] Error fetching logs for field ${fieldId}:`, error);
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to fetch field logs',
-      error
-    );
+    return { success: false, logs: [], message: 'Failed to fetch field logs', error: error?.message || String(error) };
   }
 });
