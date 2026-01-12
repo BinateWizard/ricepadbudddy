@@ -982,7 +982,7 @@ export default function DeviceDetail() {
             action: `Motor ${motorAction}`,
             actionType: 'motor',
             params: { action: motorAction },
-            result: 'sent',
+            result: 'pending',
             details: { source: 'device_page' }
           }).catch(() => {})
         ]).catch(() => {});

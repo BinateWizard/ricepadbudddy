@@ -182,7 +182,7 @@ export default function BoundaryMapPage() {
       onClearPolygon={handleClearPolygon}
       onSaveBoundary={handleSaveBoundary}
       calculatePolygonArea={calculatePolygonArea}
-      referencePolygon={fieldBoundary}
+      referencePolygon={fieldBoundary ?? undefined}
     />
   );
 }

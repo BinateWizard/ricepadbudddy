@@ -7,7 +7,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Menu, Search, HelpCircle, Info, LogOut, Home as HomeIcon, BookOpen, X, Sprout, TrendingUp, Smartphone, BarChart3 } from "lucide-react";
+import { Menu, Search, HelpCircle, Info, LogOut, Home as HomeIcon, BookOpen, X, Sprout, TrendingUp, Smartphone, BarChart3, Shield } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";

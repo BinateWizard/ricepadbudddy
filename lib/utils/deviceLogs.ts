@@ -47,7 +47,8 @@ export async function getDeviceLogs(deviceId: string, limit = 50, startAfter?: n
   } catch (error) {
     console.error('Error fetching device logs:', error);
     // Return a consistent failure shape instead of throwing to simplify callers
-    return { success: false, logs: [], message: (error && error.message) || 'Failed to fetch device logs' };
+    const err = error as any;
+    return { success: false, logs: [], message: (err && err.message) || 'Failed to fetch device logs' };
   }
 }
 
@@ -62,6 +63,7 @@ export async function getFieldLogs(fieldId: string, limit = 100) {
   } catch (error) {
     console.error('Error fetching field logs:', error);
     // Return a consistent failure shape instead of throwing to simplify callers
-    return { success: false, logs: [], message: (error && error.message) || 'Failed to fetch field logs' };
+    const err = error as any;
+    return { success: false, logs: [], message: (err && err.message) || 'Failed to fetch field logs' };
   }
 }

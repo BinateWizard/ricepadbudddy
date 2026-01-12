@@ -565,7 +565,7 @@ export function InformationTab({ field, onFieldUpdate }: InformationTabProps) {
         onClearPolygon={handleClearPolygon}
         onSaveBoundary={handleSaveBoundary}
         calculatePolygonArea={calculatePolygonArea}
-        referencePolygons={deviceBoundaries}
+        referencePolygons={deviceBoundaries ?? undefined}
       />
     </div>
   );

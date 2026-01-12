@@ -84,7 +84,7 @@ const CONTROL_ACTIONS: ControlAction[] = [
     label: 'Request GPS Location',
     description: 'Ask devices to send their latest GPS fix (ESP32B).',
     nodeId: 'ESP32B',
-    role: 'gps',
+    role: 'npk',
     action: 'read',
   },
   {
