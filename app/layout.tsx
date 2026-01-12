@@ -48,6 +48,7 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <link rel="apple-touch-icon" href="/icons/rice_logo.png" />
+        <link rel="icon" type="image/png" href="/icons/rice_logo.png" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body
