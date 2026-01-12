@@ -1,6 +1,27 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getDeviceData } from '@/lib/utils/rtdbHelper';
+
+// --- DEV/TEST: Load local NPK logs from a pasted object (for UI testing) ---
+// Replace this with your actual device data source as needed
+const LOCAL_NPK_READINGS = typeof window !== 'undefined' && (window as any).LOCAL_NPK_READINGS;
+
+function npkObjectToLogs(npkObj: any) {
+  if (!npkObj || typeof npkObj !== 'object') return [];
+  return Object.values(npkObj)
+    .map((entry: any, idx) => ({
+      id: `local-${entry.timestamp || idx}`,
+      timestamp: new Date((entry.timestamp < 10000000000 ? entry.timestamp * 1000 : entry.timestamp)),
+      nitrogen: entry.N ?? entry.nitrogen ?? null,
+      phosphorus: entry.P ?? entry.phosphorus ?? null,
+      potassium: entry.K ?? entry.potassium ?? null,
+      areaHa: entry.areaHa,
+      unit: entry.unit,
+      _src: 'local',
+    }))
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+}
 import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
@@ -63,6 +84,31 @@ export function StatisticsTab({ paddies, deviceReadings, fieldId, setDeviceReadi
   const { user } = useAuth();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('7d');
   const [historicalLogs, setHistoricalLogs] = useState<any[]>([]);
+    // Fetch RTDB logs from device/DEVICE_0005/npk_readings and use as historical logs
+    useEffect(() => {
+      async function fetchRTDBLogs() {
+        // Hardcoded deviceId for now; replace with dynamic if needed
+        const deviceId = 'DEVICE_0005';
+        const npkReadings = await getDeviceData(deviceId, 'npk_readings');
+        if (npkReadings && typeof npkReadings === 'object') {
+          // Convert to array, latest at the bottom
+          const logs = Object.values(npkReadings)
+            .map((entry: any, idx) => ({
+              id: `rtdb-${entry.timestamp || idx}`,
+              timestamp: new Date((entry.timestamp < 10000000000 ? entry.timestamp * 1000 : entry.timestamp)),
+              nitrogen: entry.N ?? entry.nitrogen ?? null,
+              phosphorus: entry.P ?? entry.phosphorus ?? null,
+              potassium: entry.K ?? entry.potassium ?? null,
+              areaHa: entry.areaHa,
+              unit: entry.unit,
+              _src: 'rtdb',
+            }))
+            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+          setHistoricalLogs(logs);
+        }
+      }
+      fetchRTDBLogs();
+    }, []);
   const [realtimeLogs, setRealtimeLogs] = useState<any[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(true); // Start with true to show loading
   const [isLogging, setIsLogging] = useState(false);
