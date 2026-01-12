@@ -1,428 +1,327 @@
-# Cloud Functions & Backend Deployment Checklist
+# PadBuddy IoT Architecture - Deployment Checklist
 
-## Pre-Deployment (Read First)
+## ✅ Pre-Deployment Verification
 
-- [ ] Read `SOLUTION_SUMMARY.md` - understand what you're getting
-- [ ] Read `BACKEND_ARCHITECTURE.md` - understand the design
-- [ ] Read `ARCHITECTURE_DIAGRAMS.md` - visualize the flows
-- [ ] Read `QUICK_REFERENCE.md` - remember the commands
-
----
-
-## Phase 1: Preparation
-
-### Firebase Project Setup
-- [ ] Project ID confirmed (currently: `rice-padbuddy`)
-- [ ] Billing enabled on Firebase project
-- [ ] Database region: `asia-southeast1` ✓
-- [ ] Cloud Functions region configured
-
-### Local Development
-- [ ] Node.js 20 installed: `node --version`
-- [ ] npm installed: `npm --version`
-- [ ] Firebase CLI installed: `firebase --version`
-- [ ] Authenticated with Firebase: `firebase login`
-- [ ] Functions built: `cd functions && npm run build`
-
----
-
-## Phase 2: Deploy Cloud Functions
-
-### Build & Deploy
-- [ ] Clean build: `cd functions && npm run build`
-  - Expected: No errors, `lib/index.js` created
-- [ ] Check dependencies: `npm list` in functions folder
-  - firebase-admin: ^12.0.0 ✓
-  - firebase-functions: ^5.0.0 ✓
-- [ ] Deploy: `npm run deploy`
-  - Expected: All 5 functions deployed with green checkmarks
-  - scheduledSensorLogger ✓
-  - realtimeAlertProcessor ✓
-  - deviceHealthMonitor ✓
-  - commandAuditLogger ✓
-  - alertCleanupScheduler ✓
-  - helloWorld ✓
-
-### Verify Deployment
-- [ ] Firebase Console > Cloud Functions
-  - [ ] All functions show green status
-  - [ ] Memory allocated: 256MB each
-  - [ ] Timeout: 60 seconds
-  - [ ] Runtime: Node.js 20
-- [ ] Test endpoint: `npm run logs`
-  - Expected: See recent function logs
-
----
-
-## Phase 3: Initialize Firestore
-
-### Create Settings Document
-**Method 1: Firebase Console**
-1. [ ] Open Firestore Database
-2. [ ] Create collection → ID: `settings`
-3. [ ] Add document → ID: `system`
-4. [ ] Paste this exact structure:
-
-```json
-{
-  "alertThresholds": {
-    "nitrogen_min": 20,
-    "nitrogen_max": 50,
-    "phosphorus_min": 10,
-    "phosphorus_max": 40,
-    "potassium_min": 150,
-    "potassium_max": 250,
-    "deviceOfflineThreshold": 600000
-  },
-  "logRetention": 2592000000,
-  "alertRetention": 7776000000,
-  "commandRetention": 5184000000,
-  "features": {
-    "offlineAlerting": true,
-    "predictiveAnalysis": false,
-    "anomalyDetection": false,
-    "pushNotifications": true,
-    "emailNotifications": false
-  },
-  "createdAt": "2025-01-02T00:00:00Z",
-  "updatedAt": "2025-01-02T00:00:00Z"
-}
+### 1. Check File Structure
+```
+✅ functions/src/heartbeatMonitor.ts
+✅ functions/src/scheduledCommands.ts
+✅ functions/src/commandLogger.ts
+✅ functions/src/index.ts (updated)
+✅ lib/utils/deviceCommands.ts (updated)
+✅ app/device/[id]/page.tsx (updated)
+✅ app/device/[id]/components/ControlPanel.tsx (updated)
 ```
 
-5. [ ] Click Save
-6. [ ] Verify document appears in Firestore
-
-**Method 2: Node.js Script** (Alternative)
-```bash
+### 2. Verify No TypeScript Errors
+```powershell
+# From project root
 cd functions
-node -e "
-const admin = require('firebase-admin');
-const serviceAccount = require('../path/to/serviceAccountKey.json');
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-admin.firestore().collection('settings').doc('system').set({
-  alertThresholds: { nitrogen_min: 20, nitrogen_max: 50, phosphorus_min: 10, phosphorus_max: 40, potassium_min: 150, potassium_max: 250, deviceOfflineThreshold: 600000 },
-  logRetention: 2592000000, alertRetention: 7776000000, commandRetention: 5184000000,
-  features: { offlineAlerting: true, predictiveAnalysis: false, anomalyDetection: false, pushNotifications: true, emailNotifications: false },
-  createdAt: new Date(), updatedAt: new Date()
-}).then(() => { console.log('✅ Done'); process.exit(0); });
-"
+npm run build
 ```
 
-### Verify Settings
-- [ ] Firestore has `settings/system` document
-- [ ] All fields present (thresholds, features, retention)
-- [ ] No errors in Firebase Console
+Expected output: No errors, compilation successful.
 
 ---
 
-## Phase 4: Apply Security Rules
+## 🚀 Step-by-Step Deployment
 
-### Update Firestore Rules
-1. [ ] Firebase Console > Firestore > Rules
-2. [ ] Clear existing rules
-3. [ ] Paste entire ruleset from `CLOUD_FUNCTIONS_IMPLEMENTATION.md`
-4. [ ] Click "Publish"
-5. [ ] Verify rules are active (green checkmark)
-
-### Test Rules
-- [ ] Can read fields owned by user: ✓
-- [ ] Cannot read fields owned by others: ✓
-- [ ] Can read settings document: ✓
-- [ ] Cannot write alerts (Cloud Functions only): ✓
-
----
-
-## Phase 5: Create Firestore Indexes
-
-### Navigate to Indexes
-1. [ ] Firebase Console > Firestore > Indexes
-2. [ ] Wait for any existing index builds to complete
-
-### Create Index 1: Logs by Timestamp
-- [ ] Collection: `fields/{fieldId}/paddies/{paddyId}/logs`
-- [ ] Field 1: `timestamp` (Descending)
-- [ ] Field 2: `deviceId` (Ascending)
-- [ ] Scope: Collection
-- [ ] Status: ✅ Created
-
-### Create Index 2: Alerts by Severity
-- [ ] Collection Group: `alerts` (all collections named "alerts")
-- [ ] Field 1: `createdAt` (Descending)
-- [ ] Field 2: `severity` (Ascending)
-- [ ] Scope: Collection Group
-- [ ] Status: ✅ Created
-
-### Create Index 3: Commands by Device
-- [ ] Collection Group: `command_audit`
-- [ ] Field 1: `deviceId` (Ascending)
-- [ ] Field 2: `requestedAt` (Descending)
-- [ ] Scope: Collection Group
-- [ ] Status: ✅ Created
-
-### Create Index 4: Paddies by Device
-- [ ] Collection Group: `paddies`
-- [ ] Field 1: `deviceId` (Ascending)
-- [ ] Field 2: `createdAt` (Descending)
-- [ ] Scope: Collection Group
-- [ ] Status: ✅ Created
-
-### Verify Indexes
-- [ ] All 4 indexes show green status
-- [ ] Index build time: typically 2-5 minutes
-- [ ] No errors in console
-
----
-
-## Phase 6: Integrate Frontend
-
-### Update Root Layout
-- [ ] File: `app/layout.tsx`
-- [ ] Import AlertProvider: `import { AlertProvider } from '@/context/AlertContext'`
-- [ ] Wrap children: `<AlertProvider>{children}</AlertProvider>`
-- [ ] Build test: `npm run build` (no errors)
-
-### Update Header Component
-- [ ] File: Your header/navbar component
-- [ ] Import AlertBadge: `import { AlertBadge } from '@/components/AlertNotifications'`
-- [ ] Add to header: `<AlertBadge />`
-- [ ] Styled correctly (shows in top-right)
-
-### Add Alert Panel to Field Page
-- [ ] File: `app/field/[id]/page.tsx`
-- [ ] Import: `import { AlertPanel, AlertBanner } from '@/components/AlertNotifications'`
-- [ ] Add AlertBanner at top
-- [ ] Add AlertPanel in sidebar/modal
-- [ ] Test: Click field, see empty alerts panel
-
-### Create Alerts Dashboard (Optional)
-- [ ] Create file: `app/alerts/page.tsx`
-- [ ] Import and use: AlertStats, AlertPanel, AlertBanner
-- [ ] Route visible in navigation
-
-### Verify Integration
-- [ ] App builds: `npm run build`
-- [ ] No TypeScript errors
-- [ ] No runtime errors in browser console
-
----
-
-## Phase 7: Test Each Component
-
-### Test 1: Sensor Logging (5-minute cycle)
-
-**Setup:**
-1. [ ] Device is online and sending sensor data
-2. [ ] RTDB shows: `devices/{deviceId}/sensors/{N, P, K, lastUpdate}`
-
-**Steps:**
-1. [ ] Wait 5 minutes for scheduler to run
-2. [ ] Open Firestore: `fields/{fieldId}/paddies/{paddyId}/logs`
-3. [ ] Verify new log document was created
-4. [ ] Log contains nitrogen, phosphorus, potassium values
-
-**Success:** ✅ Log created in Firestore
-
-### Test 2: Alert Generation (Out of Range)
-
-**Setup:**
-1. [ ] Manually add log to Firestore with extreme values:
-   - Nitrogen: 5 (below min of 20) ← CRITICAL
-   - Phosphorus: 50 (below max of 40) ← (OK)
-   - Potassium: 200 (within range)
-
-**Steps:**
-1. [ ] Firestore: `fields/{id}/paddies/{id}/logs/{docId}`
-2. [ ] New document with above values
-3. [ ] Save document
-4. [ ] Check `alerts/{fieldId}/alerts/` immediately
-5. [ ] Should see new alert with type: "npk_low", severity: "critical"
-
-**Success:** ✅ Alert created within 1 second
-
-### Test 3: Device Health Monitor (Offline Detection)
-
-**Setup:**
-1. [ ] Device currently online (has recent heartbeat)
-
-**Steps:**
-1. [ ] Stop device from sending heartbeat (turn off/disconnect)
-2. [ ] Wait 10+ minutes
-3. [ ] Check Firestore: `devices/{deviceId}`
-4. [ ] Should show: `status: "offline"`
-5. [ ] Check alerts: `alerts/{fieldId}/alerts`
-6. [ ] Should see: `type: "device_offline", severity: "critical"`
-
-**Success:** ✅ Offline alert created
-
-### Test 4: UI Display
-
-**Setup:**
-1. [ ] Create 2-3 test alerts in Firestore (mix critical/warning)
-2. [ ] App is running locally
-
-**Steps:**
-1. [ ] Open app header
-2. [ ] Look for AlertBadge: Should show count (red if critical)
-3. [ ] Click field page
-4. [ ] AlertBanner shows at top (if unacknowledged critical alert)
-5. [ ] AlertPanel shows list of all field alerts
-6. [ ] Try "Acknowledge" button on critical alert
-7. [ ] Check Firestore: `acknowledged: true`
-8. [ ] Try "Dismiss" button on warning
-9. [ ] Check Firestore: `read: true`
-
-**Success:** ✅ UI updates match Firestore state
-
-### Test 5: Command Audit Logging
-
-**Setup:**
-1. [ ] Web app connected to RTDB
-
-**Steps:**
-1. [ ] Send a command to device (via ControlPanelTab)
-2. [ ] Observe RTDB: `devices/{deviceId}/commands/{nodeId}`
-3. [ ] Check Firestore: `command_audit/`
-4. [ ] Should have new document with same command data
-5. [ ] Contains: deviceId, action, status, timestamps
-
-**Success:** ✅ Command logged to Firestore
-
-### Test 6: Push Notifications (Optional)
-
-**Setup:**
-1. [ ] User document has `fcmToken` field
-2. [ ] Browser allows notifications
-3. [ ] Browser has service worker registered
-
-**Steps:**
-1. [ ] Create a critical alert
-2. [ ] Device should have `fcmToken`
-3. [ ] Should receive push notification
-4. [ ] Check browser notification (might be silent on dev)
-5. [ ] Check Cloud Functions logs: "Sent FCM notification"
-
-**Success:** ✅ FCM attempted (may not work in dev without proper setup)
-
----
-
-## Phase 8: Production Verification
-
-### Monitor Cloud Functions
-- [ ] Dashboard: `npm run logs` shows recent executions
-- [ ] All functions have recent successful runs (green)
-- [ ] No error messages (red X)
-- [ ] No timeout messages
-
-### Verify Data Integrity
-- [ ] Firestore has no data corruption
-- [ ] RTDB still has current device state
-- [ ] Logs accumulating properly
-- [ ] Indexes are being used (green in metrics)
-
-### Performance Check
-- [ ] Alert creation < 1 second after log
-- [ ] Health check runs every 2 minutes
-- [ ] Sensor logging every 5 minutes
-- [ ] No function timeouts
-- [ ] No out-of-memory errors
-
-### Cost Verification
-- [ ] Firebase Console > Billing
-- [ ] View estimated costs for month
-- [ ] Should be minimal (free tier for most usage)
-
----
-
-## Phase 9: Team Training
-
-- [ ] Show how to access AlertBadge in header
-- [ ] Demo: Acknowledge critical alerts
-- [ ] Explain: Different alert types
-- [ ] Explain: How offline detection works
-- [ ] Document: Custom alert thresholds can be changed
-- [ ] Provide: Quick reference guide (`QUICK_REFERENCE.md`)
-
----
-
-## Phase 10: Documentation & Monitoring
-
-### Documentation
-- [ ] README updated with alert system info
-- [ ] Team has copy of `QUICK_REFERENCE.md`
-- [ ] Team knows where guides are stored
-- [ ] Contact info for support documented
-
-### Ongoing Monitoring
-- [ ] Check logs weekly: `npm run logs`
-- [ ] Monitor costs in Firebase Console > Billing
-- [ ] Review alert thresholds monthly (adjust for season)
-- [ ] Archive old data quarterly
-
----
-
-## Rollback Plan (If Issues)
-
-### If Cloud Functions Fail
-```bash
-firebase functions:delete functionName
-# Fix the code
-npm run build && npm run deploy
+### Step 1: Build Functions
+```powershell
+cd functions
+npm install  # If not already done
+npm run build
 ```
 
-### If Firestore Corrupt
-- [ ] Restore from backup (Google manages automatically)
-- [ ] Contact Google Cloud support
+### Step 2: Test Functions Locally (Optional)
+```powershell
+# Start Firebase emulators
+firebase emulators:start --only functions
 
-### If Security Rules Block Users
-- [ ] Temporarily relax rules
-- [ ] Debug in Firebase Console
-- [ ] Reapply with fixes
+# In another terminal, test functions
+# Check logs for:
+# - [Heartbeat Monitor] Starting heartbeat check...
+# - [Scheduled Commands] Checking for scheduled commands...
+```
 
-### If Indexes Not Created
-- [ ] Wait 5-10 minutes for build
-- [ ] Check Firebase Console for errors
-- [ ] Recreate if needed
+### Step 3: Deploy to Firebase
+```powershell
+# Deploy all functions
+firebase deploy --only functions
+
+# OR deploy specific functions
+firebase deploy --only functions:monitorDeviceHeartbeats
+firebase deploy --only functions:executeScheduledCommands
+firebase deploy --only functions:onDeviceHeartbeat
+firebase deploy --only functions:onLegacyDeviceHeartbeat
+```
+
+**Expected Output:**
+```
+✔  Deploy complete!
+
+Functions:
+  - monitorDeviceHeartbeats(us-central1)
+  - executeScheduledCommands(us-central1)
+  - onDeviceHeartbeat(us-central1)
+  - onLegacyDeviceHeartbeat(us-central1)
+  - scheduledSensorLogger(us-central1)
+  - realtimeAlertProcessor(us-central1)
+```
+
+### Step 4: Verify Deployment
+```powershell
+# Check function logs
+firebase functions:log --limit 50
+
+# Look for:
+# - Function deployment messages
+# - Scheduled function executions
+# - No errors
+```
+
+### Step 5: Deploy Web App (Vercel)
+```powershell
+# From project root
+git add .
+git commit -m "Implement final layered IoT architecture with heartbeat monitoring, scheduled commands, and centralized logging"
+git push origin main
+```
+
+Vercel will automatically detect and deploy the changes.
+
+### Step 6: Verify Web App
+1. Open PadBuddy web app
+2. Navigate to a device page
+3. Try toggling a relay:
+   - Should show "Waiting..." spinner
+   - Should show success/timeout message
+4. Check Firebase Console → Firestore → `commandLogs`
+   - Should see new log entry
 
 ---
 
-## Success Criteria
+## 🔍 Post-Deployment Verification
 
-✅ **Backend Ready When:**
-- [ ] All 5 Cloud Functions deployed
-- [ ] Settings document initialized
-- [ ] Security rules applied
-- [ ] All 4 Firestore indexes created
-- [ ] AlertProvider integrated in layout
-- [ ] Alert components showing in UI
-- [ ] Test alerts created and acknowledged
-- [ ] No errors in any console
-- [ ] All functions have recent successful runs
-- [ ] Team trained on system
+### Check Firebase Functions Console
+1. Go to: https://console.firebase.google.com
+2. Select your project
+3. Go to Functions
+4. Verify all 6 functions are deployed:
+   - ✅ monitorDeviceHeartbeats
+   - ✅ executeScheduledCommands
+   - ✅ onDeviceHeartbeat
+   - ✅ onLegacyDeviceHeartbeat
+   - ✅ scheduledSensorLogger
+   - ✅ realtimeAlertProcessor
+
+### Check Scheduled Functions are Running
+```powershell
+# Wait 2-3 minutes, then check logs
+firebase functions:log --only monitorDeviceHeartbeats
+
+# Should see:
+# [Heartbeat Monitor] Starting heartbeat check...
+# [Heartbeat Monitor] Check complete. Online: X, Offline: Y
+```
+
+### Check Firestore Collections
+1. Go to Firebase Console → Firestore
+2. Verify collections exist:
+   - ✅ commandLogs (may be empty initially)
+   - ✅ errors (may have offline device entries)
+   - ✅ system_logs (may be empty initially)
+
+### Test Live Command
+1. Open device page in web app
+2. Click "Turn ON Relay 1"
+3. Check:
+   - Button shows spinner
+   - Firestore `commandLogs` gets new entry
+   - Entry has fields: `deviceId`, `status`, `requestedAt`, `sentAt`
 
 ---
 
-## Sign-Off
+## 🧪 Testing Scenarios
 
-| Role | Name | Date | Status |
-|------|------|------|--------|
-| Developer | _______ | _______ | ☐ |
-| DevOps | _______ | _______ | ☐ |
-| QA | _______ | _______ | ☐ |
-| Product | _______ | _______ | ☐ |
+### Test 1: Live Command (Device Online)
+```
+Prerequisites: ESP32 is online and sending heartbeats
+
+Steps:
+1. Open device page
+2. Click "Turn ON Relay 1"
+3. Wait for response
+
+Expected Results:
+✅ Button shows "Waiting..." spinner
+✅ Within 2-5 seconds, button updates to "Turn OFF"
+✅ Firestore commandLogs has entry with status="completed"
+✅ No errors in console
+```
+
+### Test 2: Live Command (Device Offline)
+```
+Prerequisites: ESP32 is powered off
+
+Steps:
+1. Open device page
+2. Click "Turn ON Relay 1"
+3. Wait 30 seconds
+
+Expected Results:
+✅ Button shows "Waiting..." for 30 seconds
+✅ Timeout message appears
+✅ Firestore commandLogs has entry with status="timeout"
+✅ After 5 minutes, push notification: "Device offline"
+```
+
+### Test 3: Heartbeat Monitoring
+```
+Prerequisites: Device was online
+
+Steps:
+1. Turn off ESP32
+2. Wait 5-7 minutes
+3. Check phone/browser for notification
+
+Expected Results:
+✅ Push notification received: "⚠️ Device {deviceId} is offline"
+✅ Firestore errors collection has entry:
+   - type: "device_offline"
+   - severity: "critical"
+✅ RTDB devices/{deviceId}/status/online = false
+```
+
+### Test 4: Scheduled Command (Future Feature)
+```
+Note: Requires UI for creating schedules (not yet implemented)
+
+When implemented:
+1. Create daily schedule: Relay 1 ON at 6:00 AM
+2. Wait for execution time
+3. Check commandExecutions collection
+
+Expected Results:
+✅ Command executed at scheduled time
+✅ commandExecutions has entry
+✅ Device relay turned ON
+```
 
 ---
 
-## Next Phase
+## 🐛 Troubleshooting
 
-After all checkboxes complete:
-- [ ] Phase 3 features: ML predictions
-- [ ] Phase 3 features: Anomaly detection
-- [ ] Mobile app development
-- [ ] Data export/reporting
-- [ ] Team mobile push notifications
+### Problem: Functions not deploying
+```powershell
+# Check for TypeScript errors
+cd functions
+npm run build
+
+# If errors, fix them and redeploy
+firebase deploy --only functions
+```
+
+### Problem: "Waiting..." never completes
+```
+Possible causes:
+1. ESP32 not listening to RTDB commands
+2. Command path mismatch
+3. ESP32 not acknowledging
+
+Check:
+- Firebase Console → Realtime Database → devices/{deviceId}/commands/
+- ESP32 Serial Monitor for command reception logs
+- Verify ESP32 firmware implements acknowledgment
+```
+
+### Problem: No offline notifications
+```
+Possible causes:
+1. Heartbeat monitor function not running
+2. No FCM tokens for user
+3. Notification permissions denied
+
+Check:
+- firebase functions:log --only monitorDeviceHeartbeats
+- Firestore users/{userId}/fcmTokens array exists
+- Browser notification permissions granted
+```
+
+### Problem: Scheduled commands not executing
+```
+Possible causes:
+1. Function not deployed
+2. Schedule nextExecution time not set
+3. Schedule enabled=false
+
+Check:
+- firebase functions:log --only executeScheduledCommands
+- Firestore scheduledCommands collection
+- Verify nextExecution is in past (timestamp in ms)
+```
 
 ---
 
-**Questions?** → See `QUICK_REFERENCE.md` or contact your technical lead.
+## 📊 Monitoring & Maintenance
 
-**Ready to deploy?** → Start at Phase 1 and work through each phase systematically!
+### Daily Checks
+```powershell
+# Check for errors in last 24 hours
+firebase functions:log --since 1d | Select-String "error"
+
+# Check Firestore errors collection
+# Firebase Console → Firestore → errors (filter: resolved=false)
+```
+
+### Weekly Checks
+```powershell
+# Review command statistics
+# Firestore → commandLogs
+# Group by status, count success/failure rates
+
+# Check function invocation counts
+# Firebase Console → Functions → Usage
+```
+
+### Monthly Cleanup (Optional)
+```powershell
+# Clean up old logs (>90 days)
+# Run cleanupOldLogs function manually or via scheduled task
+# See: functions/src/commandLogger.ts::cleanupOldLogs
+```
+
+---
+
+## 📚 Additional Resources
+
+- **Architecture Documentation:** `docs/IOT_ARCHITECTURE.md`
+- **ESP32 Integration:** `docs/ESP32_INTEGRATION_GUIDE.md`
+- **Implementation Summary:** `docs/IMPLEMENTATION_SUMMARY.md`
+- **RTDB Structure:** `docs/RTDB_STRUCTURE.md`
+
+---
+
+## ✅ Deployment Complete Checklist
+
+After deployment, verify:
+
+- [ ] All 6 Firebase Functions deployed successfully
+- [ ] Heartbeat monitor running every 2 minutes
+- [ ] Scheduled command checker running every minute
+- [ ] Web app deployed to Vercel with no errors
+- [ ] Device page relay controls show waiting states
+- [ ] Live commands create Firestore logs
+- [ ] Offline devices trigger notifications (after 5 min)
+- [ ] No TypeScript compilation errors
+- [ ] Firebase Console shows green status for all functions
+
+---
+
+**Deployment Status:** Ready to deploy  
+**Estimated Time:** 10-15 minutes  
+**Risk Level:** Low (backward compatible with existing features)
+
+---
+
+**Happy Deploying! 🚀**
