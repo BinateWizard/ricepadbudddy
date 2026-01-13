@@ -1,3 +1,4 @@
+"use client";
 import React, { useState } from 'react';
 import { Scan } from 'lucide-react';
 import { TrendsChart } from './TrendsChart';

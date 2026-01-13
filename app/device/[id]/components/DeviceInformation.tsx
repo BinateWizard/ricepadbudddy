@@ -1,3 +1,4 @@
+"use client";
 import React, { useState } from 'react';
 import { MapPin, Edit2, Check, X } from 'lucide-react';
 

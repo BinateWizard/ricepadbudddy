@@ -1,3 +1,4 @@
+import SchedulesTab from "./SchedulesTab";
 // This file has been cleared for a fresh start.
 
 import { useState, useEffect, useRef } from 'react';
@@ -440,7 +441,14 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
                 ))}
               </div>
             )
-          ) : TABS[activeTab].id === 'controls' ? (
+          ) : null}
+          {/* Schedules Tab for Field */}
+          {activeTab === 1 && (
+            <SchedulesTab fieldId={fieldId || ""} />
+          )}
+        </div>
+      </div>
+    </div>
               paddies.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="flex flex-col items-center gap-4">

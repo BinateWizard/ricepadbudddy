@@ -1,4 +1,6 @@
+
 'use client';
+import DeviceSchedules from "./components/DeviceSchedules";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -41,37 +43,44 @@ import { logUserAction } from '@/lib/utils/userActions';
 import { logDeviceAction } from '@/lib/utils/deviceLogs';
 
 export default function DeviceDetail() {
+    // Restore required state variables for ControlPanel
+    const [isScanning, setIsScanning] = useState(false);
+    const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
+    const [scanSuccess, setScanSuccess] = useState(false);
+    const [hasSavedBoundary, setHasSavedBoundary] = useState(false);
   const params = useParams();
   const router = useRouter();
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const { visibility } = usePageVisibility();
   const deviceId = params.id as string;
-  
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  
-  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('7d');
-  const [historicalLogs, setHistoricalLogs] = useState<any[]>([]);
-  const [realtimeLogs, setRealtimeLogs] = useState<any[]>([]);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [deviceInfo, setDeviceInfo] = useState<any>(null);
-  const [paddyInfo, setPaddyInfo] = useState<any>(null);
-  const [fieldInfo, setFieldInfo] = useState<any>(null);
-  const [deviceReadings, setDeviceReadings] = useState<any[]>([]);
-  const [showLocationModal, setShowLocationModal] = useState(false);
-  const [showGetLocationModal, setShowGetLocationModal] = useState(false);
-  const gpsData = useGPSData(deviceId);
-  const [loadingGps, setLoadingGps] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
-  const weatherData = useWeatherData(deviceId);
-  
-  // Control Panel states
-  const [isScanning, setIsScanning] = useState(false);
-  const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
-  const [scanSuccess, setScanSuccess] = useState(false);
+  return (
+    <ProtectedRoute>
+      <div>
+        {/* ...existing content... */}
+        <ControlPanel
+          isScanning={isScanning}
+          lastScanTime={lastScanTime}
+          scanSuccess={scanSuccess}
+          hasSavedBoundary={hasSavedBoundary}
+          gpsData={gpsData}
+          relayStates={relayStates}
+          relayProcessing={relayProcessing}
+          motorExtended={motorExtended}
+          motorProcessing={motorProcessing}
+          gpsProcessing={gpsProcessing}
+          onScanNow={async () => {/* ... */}}
+          onOpenBoundaryMap={() => setShowBoundaryModal(true)}
+          onViewLocation={() => setShowLocationModal(true)}
+          onRelayToggle={async (idx) => {/* ... */}}
+          onMotorToggle={async () => {/* ... */}}
+        />
+        {/* Device Schedules after ControlPanel */}
+        <DeviceSchedules deviceId={deviceId} />
+        {/* ...rest of the content... */}
+      </div>
+    </ProtectedRoute>
+  );
   
   // Boundary mapping states
   const [showBoundaryModal, setShowBoundaryModal] = useState(false);
@@ -82,7 +91,6 @@ export default function DeviceDetail() {
   const [inputLng, setInputLng] = useState('');
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [pointAddedNotification, setPointAddedNotification] = useState(false);
-  const [hasSavedBoundary, setHasSavedBoundary] = useState(false);
   const [relayStates, setRelayStates] = useState<boolean[]>([false, false, false, false]);
   const [relayProcessing, setRelayProcessing] = useState<boolean[]>([false, false, false, false]);
   const [motorExtended, setMotorExtended] = useState(false);
