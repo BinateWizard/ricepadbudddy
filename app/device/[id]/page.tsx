@@ -42,109 +42,11 @@ import { getDeviceLogs } from '@/lib/utils/deviceLogs';
 import { logUserAction } from '@/lib/utils/userActions';
 import { logDeviceAction } from '@/lib/utils/deviceLogs';
 
-export default function DeviceDetail() {
-  const params = useParams();
-  const router = useRouter();
-  const pathname = usePathname();
-  const { user, signOut } = useAuth();
-  const { visibility } = usePageVisibility();
-  const deviceId = params.id as string;
-  // Restore required state variables for ControlPanel (move above usage)
-  const [relayStates, setRelayStates] = useState<boolean[]>([false, false, false, false]);
-  const [relayProcessing, setRelayProcessing] = useState<boolean[]>([false, false, false, false]);
-  const [motorExtended, setMotorExtended] = useState(false);
-  const [motorProcessing, setMotorProcessing] = useState(false);
-  const [gpsProcessing, setGpsProcessing] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-  const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
-  const [scanSuccess, setScanSuccess] = useState(false);
-  const [hasSavedBoundary, setHasSavedBoundary] = useState(false);
-  // Restore gpsData hook
-  const gpsData = useGPSData(deviceId);
-  return (
-    <ProtectedRoute>
-      <div>
-        {/* ...existing content... */}
-        <ControlPanel
-          isScanning={isScanning}
-          lastScanTime={lastScanTime}
-          scanSuccess={scanSuccess}
-          hasSavedBoundary={hasSavedBoundary}
-          gpsData={gpsData}
-          relayStates={relayStates}
-          relayProcessing={relayProcessing}
-          motorExtended={motorExtended}
-          motorProcessing={motorProcessing}
-          gpsProcessing={gpsProcessing}
-          onScanNow={async () => {/* ... */}}
-          onOpenBoundaryMap={() => setShowBoundaryModal(true)}
-          onViewLocation={() => setShowLocationModal(true)}
-          onRelayToggle={async (idx) => {/* ... */}}
-          onMotorToggle={async () => {/* ... */}}
-        />
-        {/* Device Schedules after ControlPanel */}
-        <DeviceSchedules deviceId={deviceId} />
-        {/* ...rest of the content... */}
-      </div>
-    </ProtectedRoute>
-  );
-  
-  // Boundary mapping states
-  const [showBoundaryModal, setShowBoundaryModal] = useState(false);
-  const [polygonCoords, setPolygonCoords] = useState<{lat: number; lng: number}[]>([]);
-  const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 }); // Default Philippines, will be updated
-  const [isSavingBoundary, setIsSavingBoundary] = useState(false);
-  const [inputLat, setInputLat] = useState('');
-  const [inputLng, setInputLng] = useState('');
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [pointAddedNotification, setPointAddedNotification] = useState(false);
-  const [relayStates, setRelayStates] = useState<boolean[]>([false, false, false, false]);
-  const [relayProcessing, setRelayProcessing] = useState<boolean[]>([false, false, false, false]);
-  const [motorExtended, setMotorExtended] = useState(false);
-  const [motorProcessing, setMotorProcessing] = useState(false);
-  const [gpsProcessing, setGpsProcessing] = useState(false);
-  const [mapMode, setMapMode] = useState<'view' | 'edit'>('view');
-  const [deviceOnlineStatus, setDeviceOnlineStatus] = useState<{online: boolean; lastChecked: number} | null>(null);
+// ...all state, hooks, and logic should be above the return...
 
-  // Device logs state
-  const [showDeviceLogs, setShowDeviceLogs] = useState(false);
-  const [deviceLogs, setDeviceLogs] = useState<any[]>([]);
-  const [loadingDeviceLogs, setLoadingDeviceLogs] = useState(false);
-  const [logsLimit, setLogsLimit] = useState(10);
-
-  // Per-paddy NPK goal (total fertilizer target), derived from field variety and paddy area
-  const [npkGoal, setNpkGoal] = useState<{ n: string; p: string; k: string } | null>(null);
-
-  // Live NPK data from Firestore logs (populated by Cloud Functions)
-  const paddyLiveData = usePaddyLiveData(user?.uid ?? null, fieldInfo?.id ?? null, paddyInfo?.id ?? null);
-
-  // Listen to RTDB status (set by Cloud Function based on heartbeat)
   useEffect(() => {
     if (!deviceId || !user) return;
-
-    const statusRef = ref(database, `devices/${deviceId}/status`);
-    const unsubscribe = onValue(statusRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const status = snapshot.val();
-        setDeviceOnlineStatus({
-          online: status.online === true,
-          lastChecked: status.lastChecked || Date.now()
-        });
-      } else {
-        setDeviceOnlineStatus(null);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [deviceId]);
-
-  // Listen to relay states from RTDB (stored by Cloud Function)
-  // Listens to individual relays so it updates even if not all relays are stored yet
-  useEffect(() => {
-    if (!deviceId || !user) return;
-
-    const unsubscribes: (() => void)[] = [];
-    
+    const unsubscribes: Array<() => void> = [];
     // Listen to each relay individually
     for (let i = 1; i <= 4; i++) {
       const relayRef = ref(database, `devices/${deviceId}/relays/${i}`);
@@ -167,7 +69,6 @@ export default function DeviceDetail() {
       });
       unsubscribes.push(unsubscribe);
     }
-
     return () => unsubscribes.forEach(unsub => unsub());
   }, [deviceId, user]);
 
