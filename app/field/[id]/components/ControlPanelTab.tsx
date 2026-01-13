@@ -355,6 +355,7 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
               userId={user?.uid || null}
             />
           )}
+
           {activeTab === 0 ? (
             loading ? (
               <div className="text-black text-center">Loading status...</div>
@@ -448,33 +449,6 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
           )}
         </div>
       </div>
-    </div>
-              paddies.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
-                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-gray-900 mb-1">No paddies connected</p>
-                      <p className="text-sm text-gray-600">Add a paddy with a device to start controlling relays and sensors</p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Field Controls */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <div className="text-base font-bold text-gray-900">Field Controls</div>
-                      <div className="text-xs text-gray-600 mt-1">Select an action to control your devices</div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {CONTROL_ACTIONS.map((action) => (
                       <div
                         key={action.id}
                         className="w-full rounded-2xl border-2 border-emerald-100 bg-white px-5 py-4 shadow-sm hover:border-emerald-400 hover:shadow-lg transition-all duration-200 min-h-[64px] flex items-center justify-between gap-4"
@@ -496,106 +470,6 @@ export default function ControlPanelTab({ paddies = [], fieldId, deviceReadings 
                         </button>
                       </div>
                     ))}
-                  </div>
-
-                  {/* Device Logs Section removed from Controls tab to avoid unnecessary fetches */}
-                </div>
-              )
-            ) : (
-              <div className="text-black text-center">
-                {TABS[activeTab].id === 'logs' && (
-                  <LogsControls />
-                )}
-                {TABS[activeTab].id === 'location' && (
-                  <LocationControls devices={deviceData} />
-                )}
-                {TABS[activeTab].id === 'info' && (
-                  <div className="space-y-4">
-                    <div className="mb-4">
-                      <h3 className="text-lg font-bold text-gray-900 mb-1">Device Summary</h3>
-                      <p className="text-sm text-gray-600">Overview of all devices in this field</p>
-                    </div>
-
-                    {deviceData.length === 0 ? (
-                      <div className="text-center py-12">
-                        <div className="flex flex-col items-center gap-4">
-                          <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
-                            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                            </svg>
-                          </div>
-                          <div>
-                            <p className="text-lg font-semibold text-gray-900 mb-1">No devices found</p>
-                            <p className="text-sm text-gray-600">Add paddies with devices to see their summary</p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse">
-                          <thead>
-                            <tr className="bg-gray-100 border-b-2 border-gray-200">
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Device ID</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Paddy</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">Relay 1</th>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">Relay 2</th>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">Relay 3</th>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">Relay 4</th>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">NPK</th>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">GPS</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {deviceData.map((dev: any, idx: number) => (
-                              <tr key={dev.id} className={`border-b border-gray-200 hover:bg-gray-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                                <td className="px-4 py-3">
-                                  <div className="font-mono text-xs font-semibold text-gray-900">{dev.id}</div>
-                                  <div className="text-[10px] text-gray-500 mt-0.5">{formatTimeAgo(dev.status?.lastUpdate)}</div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="text-sm font-semibold text-gray-900">{dev.paddyName || `Paddy ${dev.paddyId}`}</div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2">
-                                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${dev.status?.color === 'green' ? 'bg-green-500' : dev.status?.color === 'yellow' ? 'bg-yellow-400' : 'bg-red-500'}`}></span>
-                                    <span className="text-xs font-semibold text-gray-900">{dev.status?.badge || 'Unknown'}</span>
-                                  </div>
-                                </td>
-                                {[1, 2, 3, 4].map((relayNum) => {
-                                  const relayState = dev.relayStates?.[relayNum] || 'unknown';
-                                  return (
-                                    <td key={`relay-${relayNum}`} className="px-4 py-3 text-center">
-                                      {relayState === 'on' ? (
-                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
-                                          ON
-                                        </span>
-                                      ) : relayState === 'off' ? (
-                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-gray-200 text-gray-700 border border-gray-300">
-                                          OFF
-                                        </span>
-                                      ) : (
-                                        <span className="text-xs text-gray-400">-</span>
-                                      )}
-                                    </td>
-                                  );
-                                })}
-                                <td className="px-4 py-3 text-center">
-                                  {dev.npk && (dev.npk.n !== undefined || dev.npk.p !== undefined || dev.npk.k !== undefined) ? (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                                      Active
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-gray-200 text-gray-600 border border-gray-300">
-                                      No data
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  {dev.gps?.lat && dev.gps?.lng ? (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                                      Located
-                                    </span>
                                   ) : (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-gray-200 text-gray-600 border border-gray-300">
                                       No data
