@@ -43,6 +43,8 @@ import { logUserAction } from '@/lib/utils/userActions';
 import { logDeviceAction } from '@/lib/utils/deviceLogs';
 
 export default function DeviceDetail() {
+      // Restore gpsData hook
+      const gpsData = useGPSData(deviceId);
     // Restore required state variables for ControlPanel
     const [isScanning, setIsScanning] = useState(false);
     const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
