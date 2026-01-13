@@ -43,19 +43,24 @@ import { logUserAction } from '@/lib/utils/userActions';
 import { logDeviceAction } from '@/lib/utils/deviceLogs';
 
 export default function DeviceDetail() {
-      // Restore gpsData hook
-      const gpsData = useGPSData(deviceId);
-    // Restore required state variables for ControlPanel
-    const [isScanning, setIsScanning] = useState(false);
-    const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
-    const [scanSuccess, setScanSuccess] = useState(false);
-    const [hasSavedBoundary, setHasSavedBoundary] = useState(false);
   const params = useParams();
   const router = useRouter();
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const { visibility } = usePageVisibility();
   const deviceId = params.id as string;
+  // Restore required state variables for ControlPanel (move above usage)
+  const [relayStates, setRelayStates] = useState<boolean[]>([false, false, false, false]);
+  const [relayProcessing, setRelayProcessing] = useState<boolean[]>([false, false, false, false]);
+  const [motorExtended, setMotorExtended] = useState(false);
+  const [motorProcessing, setMotorProcessing] = useState(false);
+  const [gpsProcessing, setGpsProcessing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
+  const [scanSuccess, setScanSuccess] = useState(false);
+  const [hasSavedBoundary, setHasSavedBoundary] = useState(false);
+  // Restore gpsData hook
+  const gpsData = useGPSData(deviceId);
   return (
     <ProtectedRoute>
       <div>
